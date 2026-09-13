@@ -584,6 +584,112 @@ function renderTimeline(commits) {
     </div>`).join('');
 }
 
+function renderBranches(branches) {
+  const el = document.getElementById('gitBranchList');
+  const countEl = document.getElementById('branchCount');
+  if (!branches.length) {
+    el.innerHTML = '<div class="git-empty-hint">暂无分支信息</div>';
+    countEl.textContent = '';
+    return;
+  }
+  const local = branches.filter(b => !b.is_remote);
+  const remote = branches.filter(b => b.is_remote);
+  countEl.textContent = `${local.length} 本地 / ${remote.length} 远程`;
+
+  let html = '';
+  // 当前分支排第一，然后本地，然后远程
+  const sorted = [
+    ...local.filter(b => b.is_current),
+    ...local.filter(b => !b.is_current),
+    ...remote
+  ];
+
+  sorted.forEach(b => {
+    const cls = b.is_current ? ' current' : '';
+    const dotCls = b.is_current ? 'current-dot' : (b.is_remote ? 'remote' : 'local');
+    const badge = b.is_current ? '<span class="branch-current-badge">当前</span>' :
+                  b.is_remote ? '<span class="branch-remote-badge">远程</span>' : '';
+    html += `<div class="branch-item${cls}">
+      <span class="branch-dot ${dotCls}"></span>
+      <span class="branch-name" title="${escHtml(b.name)}">${escHtml(b.name)}</span>
+      <span class="branch-hash">${b.hash}</span>
+      ${badge}
+    </div>`;
+  });
+
+  el.innerHTML = html;
+}
+
+function renderWorktrees(worktrees) {
+  const el = document.getElementById('gitWorktreeList');
+  const countEl = document.getElementById('worktreeCount');
+  if (!worktrees.length) {
+    el.innerHTML = '<div class="git-empty-hint">仅主工作树</div>';
+    countEl.textContent = '';
+    return;
+  }
+  countEl.textContent = `${worktrees.length} 个`;
+
+  el.innerHTML = worktrees.map((wt, i) => {
+    const isMain = i === 0;
+    const mainCls = isMain ? ' main-wt' : '';
+    const icon = isMain ? '🏠' : '🌳';
+    const badge = isMain ? '<span class="wt-badge main">主工作树</span>' :
+                           '<span class="wt-badge linked">链接</span>';
+    const branchInfo = wt.branch ? `<span class="wt-branch">🌿 ${escHtml(wt.branch)}</span>` :
+                       wt.detached ? '<span style="color:var(--orange);font-size:11px">HEAD 已分离</span>' :
+                       wt.bare ? '<span style="color:var(--text-muted);font-size:11px">裸仓库</span>' : '';
+    const headInfo = wt.head ? `<span class="wt-head">@ ${wt.head}</span>` : '';
+
+    return `<div class="wt-item${mainCls}">
+      <div class="wt-header">
+        <span class="wt-icon">${icon}</span>
+        ${branchInfo}
+        ${headInfo}
+        ${badge}
+      </div>
+      <div class="wt-path" title="${escHtml(wt.path)}">${escHtml(wt.path)}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderStashes(stashes) {
+  const el = document.getElementById('gitStashList');
+  const countEl = document.getElementById('stashCount');
+  if (!stashes.length) {
+    el.innerHTML = '<div class="git-empty-hint">无暂存内容</div>';
+    countEl.textContent = '';
+    return;
+  }
+  countEl.textContent = `${stashes.length} 条`;
+
+  el.innerHTML = stashes.map(s => `
+    <div class="stash-item">
+      <span class="stash-ref">${escHtml(s.ref)}</span>
+      <span class="stash-msg" title="${escHtml(s.message)}">${escHtml(s.message)}</span>
+      <span class="stash-time">${escHtml(s.time)}</span>
+    </div>`).join('');
+}
+
+function renderTags(tags) {
+  const el = document.getElementById('gitTagList');
+  const countEl = document.getElementById('tagCount');
+  if (!tags.length) {
+    el.innerHTML = '<div class="git-empty-hint">暂无标签</div>';
+    countEl.textContent = '';
+    return;
+  }
+  countEl.textContent = `${tags.length} 个`;
+
+  el.innerHTML = tags.map(t => `
+    <div class="tag-item">
+      <span class="tag-icon">🏷️</span>
+      <span class="tag-name">${escHtml(t.name)}</span>
+      <span class="tag-hash">${t.hash}</span>
+      <span class="tag-time">${escHtml(t.time)}</span>
+    </div>`).join('');
+}
+
 function startGitRefresh() {
   if (gitRefreshTimer) clearInterval(gitRefreshTimer);
   refreshGitStatus();
