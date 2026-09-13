@@ -81,10 +81,15 @@ function serveStatic(req, res, urlPath) {
   fs.createReadStream(filePath).pipe(res);
 }
 
-// ======= Git 命令（使用 execFileSync 避免 shell 解析 | 等特殊字符）=======
+// ======= Git 命令（使用 execFileSync 避免 shell 解析 | 等特殊字符，静默捕获 stderr）=======
 function runGit(args, cwd) {
   try {
-    return execFileSync('git', args, { cwd, encoding: 'utf-8', timeout: 5000 }).trim();
+    return execFileSync('git', args, {
+      cwd,
+      encoding: 'utf-8',
+      timeout: 5000,
+      stdio: ['pipe', 'pipe', 'ignore']
+    }).trim();
   } catch (e) { return null; }
 }
 
@@ -111,11 +116,14 @@ function gitStatus(projectPath) {
   const untracked = lines.filter(l => l.startsWith('??')).length;
 
   let ahead = 0, behind = 0;
-  const remoteStatus = runGit(['rev-list', '--count', '--left-right', '@{upstream}...HEAD'], projectPath);
-  if (remoteStatus) {
-    const parts = remoteStatus.split('\t');
-    behind = parseInt(parts[0]) || 0;
-    ahead  = parseInt(parts[1]) || 0;
+  const hasUpstream = runGit(['rev-parse', '--abbrev-ref', '@{upstream}'], projectPath);
+  if (hasUpstream) {
+    const remoteStatus = runGit(['rev-list', '--count', '--left-right', '@{upstream}...HEAD'], projectPath);
+    if (remoteStatus) {
+      const parts = remoteStatus.split('\t');
+      behind = parseInt(parts[0]) || 0;
+      ahead  = parseInt(parts[1]) || 0;
+    }
   }
 
   // 提交历史
