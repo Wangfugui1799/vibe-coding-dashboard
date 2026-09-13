@@ -4,16 +4,17 @@
 
 ## 快速启动
 
-```bash
-# 1. 安装依赖
-npm install
+无需安装任何依赖 —— 后端只用 Node.js 内置模块实现（要求 Node >= 16）：
 
-# 2. 启动服务
+```bash
+# 1. 启动服务
 npm start
 
-# 3. 浏览器访问
+# 2. 浏览器访问
 open http://localhost:3333
 ```
+
+服务仅监听 `127.0.0.1`，只允许本机访问。
 
 ## 功能
 
@@ -33,5 +34,5 @@ open http://localhost:3333
 ## 数据存储
 
 所有数据保存在 `server/data/` 目录下：
-- `tasks.json` —— 需求数据
-- `config.json` —— 项目配置
+- `tasks.json` —— 需求数据（首次启动即存在）
+- `config.json` —— 项目配置（首次保存设置时自动生成）

@@ -264,7 +264,7 @@ function renderKanban() {
 }
 
 function renderCard(task) {
-  const tags = (task.tags || []).map(t => `<span class="card-tag">${t}</span>`).join('');
+  const tags = (task.tags || []).map(t => `<span class="card-tag">${escHtml(t)}</span>`).join('');
   const nextBtn = task.status === 'todo'
     ? `<button class="card-action-btn btn-move-next" title="开始">▶</button>`
     : task.status === 'doing'
@@ -272,7 +272,7 @@ function renderCard(task) {
     : '';
 
   const commits = task.linked_commits?.length
-    ? `<div class="card-commit">📎 ${task.linked_commits.slice(-1)[0]}</div>`
+    ? `<div class="card-commit">📎 ${escHtml(task.linked_commits.slice(-1)[0])}</div>`
     : '';
 
   const timeInfo = task.status === 'done' && task.done_at
@@ -300,7 +300,12 @@ function renderCard(task) {
 }
 
 function escHtml(str) {
-  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function updateBadges() {
@@ -818,6 +823,8 @@ async function loadSettings() {
     document.getElementById('settingProjectPath').value = config.project_path || '';
     document.getElementById('settingRefreshInterval').value =
       Math.round((config.git_refresh_interval || 5000) / 1000);
+    // 同步到全局变量，否则刷新页面后未点「保存设置」时，自动刷新仍用默认 5 秒
+    gitRefreshInterval = config.git_refresh_interval || 5000;
     document.getElementById('projectName').textContent = config.project_name || '仪表盘';
 
     // 加载统计

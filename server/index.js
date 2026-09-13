@@ -8,6 +8,8 @@ const { execFileSync } = require('child_process');
 const { URL } = require('url');
 
 const PORT       = 3333;
+// 仅绑定本机回环地址。服务含 /api/browse（可列任意目录）且无鉴权，不可暴露到局域网
+const HOST       = '127.0.0.1';
 const CLIENT_DIR = path.join(__dirname, '../client');
 const DATA_DIR   = path.join(__dirname, 'data');
 const TASKS_FILE  = path.join(DATA_DIR, 'tasks.json');
@@ -67,10 +69,13 @@ const MIME = {
 
 // ======= 静态文件服务 =======
 function serveStatic(req, res, urlPath) {
-  let filePath = path.join(CLIENT_DIR, urlPath === '/' ? 'index.html' : urlPath);
-  // 防止路径穿越
-  if (!filePath.startsWith(CLIENT_DIR)) { err(res, 'Forbidden', 403); return; }
-  if (!fs.existsSync(filePath)) {
+  // 先归一化 URL 路径（消解 ..），再拼接，避免 /../client2/x 之类的绕过
+  const normalized = path.posix.normalize(urlPath);
+  let filePath = path.resolve(CLIENT_DIR, '.' + normalized);
+  // 归一化后仍须严格位于 CLIENT_DIR 之内
+  const rel = path.relative(CLIENT_DIR, filePath);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) { err(res, 'Forbidden', 403); return; }
+  if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
     // SPA fallback
     filePath = path.join(CLIENT_DIR, 'index.html');
   }
@@ -304,7 +309,7 @@ async function handleRequest(req, res) {
         priority: body.priority || 'medium',
         prompt:   body.prompt || '',
         created_at: now,
-        started_at: body.status === 'doing' ? now : (body.started_at || null),
+        started_at: (body.status === 'doing' || body.status === 'done') ? now : (body.started_at || null),
         done_at:    body.status === 'done'  ? now : null,
         linked_commits: body.linked_commits || [],
         tags:           body.tags || [],
@@ -335,12 +340,18 @@ async function handleRequest(req, res) {
       const task = data.tasks[idx];
       const now  = new Date().toISOString();
       if (body.status && body.status !== task.status) {
-        if (body.status === 'doing' && !task.started_at) body.started_at = now;
+        if (body.status === 'doing') {
+          if (!task.started_at) body.started_at = now;
+          body.done_at = null;            // 从已完成退回，清空完成时间
+        }
         if (body.status === 'done') {
           body.done_at = now;
           if (!task.started_at) body.started_at = now;
         }
-        if (body.status === 'todo') body.started_at = null; // 退回待做清空开始时间
+        if (body.status === 'todo') {
+          body.started_at = null;         // 退回待做，开始与完成时间一并清空
+          body.done_at = null;
+        }
       }
       data.tasks[idx] = { ...task, ...body };
       writeJSON(TASKS_FILE, data);
@@ -427,12 +438,13 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, HOST, () => {
   console.log('');
   console.log('╔═══════════════════════════════════════╗');
   console.log('║   ⚡ Vibe Coding 仪表盘 已启动！      ║');
   console.log(`║   👉 http://localhost:${PORT}           ║`);
   console.log('╚═══════════════════════════════════════╝');
   console.log('');
+  console.log(`仅本机可访问（${HOST}:${PORT}）`);
   console.log('按 Ctrl+C 停止服务');
 });
