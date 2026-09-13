@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vibe Coding 仪表盘</title>
+  <link rel="stylesheet" href="css/style.css">
+  <!-- marked.js for Markdown rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+
+<!-- ======= 顶部导航 ======= -->
+<header class="header">
+  <div class="header-left">
+    <span class="logo">⚡ Vibe Coding</span>
+    <span class="project-name" id="projectName">仪表盘</span>
+  </div>
+  <div class="header-center">
+    <nav class="tab-nav">
+      <button class="tab-btn active" data-tab="kanban">📋 需求看板</button>
+      <button class="tab-btn" data-tab="git">🌿 Git 状态</button>
+      <button class="tab-btn" data-tab="editor">✍️ Prompt 编辑</button>
+      <button class="tab-btn" data-tab="settings">⚙️ 设置</button>
+    </nav>
+  </div>
+  <div class="header-right">
+    <!-- 进度总览 -->
+    <div class="progress-badges" id="progressBadges">
+      <span class="badge badge-todo" id="badgeTodo">0 待做</span>
+      <span class="badge badge-doing" id="badgeDoing">0 进行中</span>
+      <span class="badge badge-done" id="badgeDone">0 完成</span>
+    </div>
+  </div>
+</header>
+
+<!-- ======= 主内容区 ======= -->
+<main class="main">
+
+  <!-- ===== TAB: 需求看板 ===== -->
+  <section class="tab-panel active" id="tab-kanban">
+    <div class="kanban-toolbar">
+      <button class="btn btn-primary" id="btnNewTask">＋ 新建需求</button>
+      <div class="search-box">
+        <input type="text" id="searchInput" placeholder="搜索需求..." />
+      </div>
+      <div class="filter-group">
+        <label>优先级</label>
+        <select id="filterPriority">
+          <option value="">全部</option>
+          <option value="high">🔴 高</option>
+          <option value="medium">🟡 中</option>
+          <option value="low">🟢 低</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="kanban-board">
+      <!-- 待做 -->
+      <div class="kanban-col" id="col-todo" data-status="todo">
+        <div class="col-header">
+          <span class="col-icon">📝</span>
+          <span class="col-title">待做需求</span>
+          <span class="col-count" id="count-todo">0</span>
+        </div>
+        <div class="col-body" id="cards-todo"></div>
+        <button class="col-add-btn" data-status="todo">＋ 添加需求</button>
+      </div>
+
+      <!-- 进行中 -->
+      <div class="kanban-col" id="col-doing" data-status="doing">
+        <div class="col-header">
+          <span class="col-icon">🔄</span>
+          <span class="col-title">进行中</span>
+          <span class="col-count" id="count-doing">0</span>
+        </div>
+        <div class="col-body" id="cards-doing"></div>
+        <button class="col-add-btn" data-status="doing">＋ 添加需求</button>
+      </div>
+
+      <!-- 已完成 -->
+      <div class="kanban-col" id="col-done" data-status="done">
+        <div class="col-header">
+          <span class="col-icon">✅</span>
+          <span class="col-title">已完成</span>
+          <span class="col-count" id="count-done">0</span>
+        </div>
+        <div class="col-body" id="cards-done"></div>
+        <button class="col-add-btn" data-status="done">＋ 添加需求</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== TAB: Git 状态 ===== -->
+  <section class="tab-panel" id="tab-git">
+    <div class="git-layout">
+
+      <!-- 左：状态概览 -->
+      <div class="git-overview">
+        <div class="git-card">
+          <div class="git-card-header">
+            <span>🌿 当前分支</span>
+            <button class="icon-btn refresh-btn" id="gitRefreshBtn" title="刷新">↻</button>
+          </div>
+          <div class="git-branch" id="gitBranch">—</div>
+        </div>
+
+        <div class="git-card">
+          <div class="git-card-header">最新 Commit</div>
+          <div id="gitLastCommit" class="git-commit-info">
+            <div class="commit-hash">—</div>
+            <div class="commit-msg">—</div>
+            <div class="commit-meta">—</div>
+          </div>
+        </div>
+
+        <div class="git-card">
+          <div class="git-card-header">工作区状态</div>
+          <div class="git-changes" id="gitChanges">
+            <div class="change-item"><span class="change-label">暂存变更</span><span class="change-count" id="gitStaged">—</span></div>
+            <div class="change-item"><span class="change-label">未暂存</span><span class="change-count" id="gitModified">—</span></div>
+            <div class="change-item"><span class="change-label">未追踪</span><span class="change-count" id="gitUntracked">—</span></div>
+          </div>
+        </div>
+
+        <div class="git-card">
+          <div class="git-card-header">远程同步</div>
+          <div class="git-sync" id="gitSync">
+            <span class="sync-ahead" id="gitAhead">↑ 0 ahead</span>
+            <span class="sync-behind" id="gitBehind">↓ 0 behind</span>
+          </div>
+        </div>
+
+        <!-- 变更文件列表 -->
+        <div class="git-card git-files-card">
+          <div class="git-card-header">变更文件</div>
+          <div id="gitFileList" class="git-file-list"></div>
+        </div>
+
+        <!-- 分支列表 -->
+        <div class="git-card">
+          <div class="git-card-header">
+            <span>🌿 分支列表</span>
+            <span class="git-update-time" id="branchCount"></span>
+          </div>
+          <div id="gitBranchList" class="git-branch-list"></div>
+        </div>
+
+        <!-- 工作树 -->
+        <div class="git-card">
+          <div class="git-card-header">
+            <span>🌳 工作树 (Worktree)</span>
+            <span class="git-update-time" id="worktreeCount"></span>
+          </div>
+          <div id="gitWorktreeList" class="git-worktree-list"></div>
+        </div>
+
+        <!-- Stash -->
+        <div class="git-card">
+          <div class="git-card-header">
+            <span>📦 Stash 暂存</span>
+            <span class="git-update-time" id="stashCount"></span>
+          </div>
+          <div id="gitStashList" class="git-stash-list"></div>
+        </div>
+
+        <!-- Tags -->
+        <div class="git-card">
+          <div class="git-card-header">
+            <span>🏷️ 标签 (Tags)</span>
+            <span class="git-update-time" id="tagCount"></span>
+          </div>
+          <div id="gitTagList" class="git-tag-list"></div>
+        </div>
+
+      </div>
+
+      <!-- 右：提交历史时间线 -->
+      <div class="git-timeline-panel">
+        <div class="git-card" style="height:100%">
+          <div class="git-card-header">
+            <span>📜 提交历史</span>
+            <span class="git-update-time" id="gitUpdateTime">未刷新</span>
+          </div>
+          <div id="gitTimeline" class="git-timeline"></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ===== TAB: Prompt 编辑器 ===== -->
+  <section class="tab-panel" id="tab-editor">
+    <div class="editor-layout">
+
+      <!-- 左：模板库 + 任务选择 -->
+      <div class="editor-sidebar">
+        <div class="sidebar-section">
+          <div class="sidebar-title">📦 Prompt 模板</div>
+          <div class="template-list" id="templateList"></div>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-title">🔗 关联需求</div>
+          <select id="editorTaskLink" class="full-select">
+            <option value="">— 不关联 —</option>
+          </select>
+          <button class="btn btn-sm btn-outline" id="btnSaveToTask" style="margin-top:8px;width:100%">
+            💾 保存 Prompt 到需求
+          </button>
+        </div>
+      </div>
+
+      <!-- 中：Markdown 编辑区 -->
+      <div class="editor-write-area">
+        <div class="editor-toolbar">
+          <span class="editor-title-label">✍️ Prompt 文档</span>
+          <div class="editor-actions">
+            <button class="btn btn-sm btn-outline" id="btnClearEditor">清空</button>
+            <button class="btn btn-primary" id="btnCopyPrompt">📋 一键复制 Prompt</button>
+          </div>
+        </div>
+        <div class="editor-title-row">
+          <input type="text" id="editorTitle" placeholder="需求标题（可选）" class="editor-title-input" />
+          <select id="editorPriority" class="priority-select">
+            <option value="medium">🟡 中优先级</option>
+            <option value="high">🔴 高优先级</option>
+            <option value="low">🟢 低优先级</option>
+          </select>
+        </div>
+        <textarea id="promptEditor" placeholder="在这里写你的需求 Prompt（支持 Markdown）...
+
+## 背景与目标
+<!-- 告诉 AI 为什么要做这个，解决什么问题 -->
+
+## 具体要求
+- [ ] 要求一
+- [ ] 要求二
+
+## 技术约束
+- 技术栈：...
+- 禁止使用：...
+
+## 验收标准
+- [ ] 验收项一
+- [ ] 验收项二
+"></textarea>
+      </div>
+
+      <!-- 右：实时预览 -->
+      <div class="editor-preview-area">
+        <div class="preview-header">👁️ 实时预览</div>
+        <div id="promptPreview" class="markdown-preview"></div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ===== TAB: 设置 ===== -->
+  <section class="tab-panel" id="tab-settings">
+    <div class="settings-layout">
+      <div class="settings-card">
+        <h2>⚙️ 项目设置</h2>
+        <div class="form-group">
+          <label>项目名称</label>
+          <input type="text" id="settingProjectName" placeholder="我的项目" />
+        </div>
+        <div class="form-group">
+          <label>Git 项目路径</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="text" id="settingProjectPath" placeholder="/Users/yourname/yourproject" style="flex:1" />
+            <button class="btn btn-outline btn-sm" id="btnBrowseFolder">📂 浏览选择</button>
+          </div>
+          <div class="form-hint">填写你的 Vibe Coding 目标项目的本地绝对路径，或点击「浏览选择」</div>
+        </div>
+        <div class="form-group">
+          <label>Git 自动刷新间隔（秒）</label>
+          <input type="number" id="settingRefreshInterval" value="5" min="2" max="60" />
+        </div>
+        <button class="btn btn-primary" id="btnSaveSettings">💾 保存设置</button>
+        <div id="settingMsg" class="setting-msg"></div>
+      </div>
+
+      <div class="settings-card">
+        <h2>📊 今日统计</h2>
+        <div id="todayStats" class="today-stats">
+          <div class="stat-item"><span class="stat-label">今日完成需求</span><span class="stat-value" id="statTodayDone">—</span></div>
+          <div class="stat-item"><span class="stat-label">总需求数</span><span class="stat-value" id="statTotal">—</span></div>
+          <div class="stat-item"><span class="stat-label">完成率</span><span class="stat-value" id="statRate">—</span></div>
+        </div>
+
+        <!-- 进度环 -->
+        <div class="progress-ring-container">
+          <svg viewBox="0 0 120 120" class="progress-ring">
+            <circle class="ring-bg" cx="60" cy="60" r="50" fill="none" stroke-width="12"/>
+            <circle class="ring-todo" id="ringTodo" cx="60" cy="60" r="50" fill="none" stroke-width="12"
+              stroke-dasharray="314" stroke-dashoffset="314" transform="rotate(-90 60 60)"/>
+            <circle class="ring-doing" id="ringDoing" cx="60" cy="60" r="50" fill="none" stroke-width="12"
+              stroke-dasharray="314" stroke-dashoffset="314" transform="rotate(-90 60 60)"/>
+            <circle class="ring-done" id="ringDone" cx="60" cy="60" r="50" fill="none" stroke-width="12"
+              stroke-dasharray="314" stroke-dashoffset="314" transform="rotate(-90 60 60)"/>
+            <text x="60" y="55" text-anchor="middle" class="ring-label-num" id="ringPct">0%</text>
+            <text x="60" y="72" text-anchor="middle" class="ring-label-sub">完成率</text>
+          </svg>
+          <div class="ring-legend">
+            <div class="legend-item"><span class="dot dot-done"></span>已完成</div>
+            <div class="legend-item"><span class="dot dot-doing"></span>进行中</div>
+            <div class="legend-item"><span class="dot dot-todo"></span>待做</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ======= 任务详情/编辑 模态框 ======= -->
+<div class="modal-overlay" id="taskModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span id="modalTitle">新建需求</span>
+      <button class="modal-close" id="modalClose">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>需求标题 *</label>
+        <input type="text" id="modalTaskTitle" placeholder="简明扼要描述这个需求" />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>状态</label>
+          <select id="modalTaskStatus">
+            <option value="todo">📝 待做</option>
+            <option value="doing">🔄 进行中</option>
+            <option value="done">✅ 已完成</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>优先级</label>
+          <select id="modalTaskPriority">
+            <option value="high">🔴 高</option>
+            <option value="medium">🟡 中</option>
+            <option value="low">🟢 低</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>标签（逗号分隔）</label>
+        <input type="text" id="modalTaskTags" placeholder="frontend, auth, bug" />
+      </div>
+      <div class="form-group">
+        <label>Prompt 文档（Markdown）</label>
+        <textarea id="modalTaskPrompt" rows="12" placeholder="在这里写需求 Prompt...&#10;&#10;## 背景与目标&#10;&#10;## 具体要求&#10;&#10;## 技术约束&#10;&#10;## 验收标准"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="modalCancel">取消</button>
+      <button class="btn btn-outline" id="modalOpenEditor">✍️ 在编辑器中打开</button>
+      <button class="btn btn-primary" id="modalSave">💾 保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======= 文件夹浏览器 模态框 ======= -->
+<div class="modal-overlay" id="browseModal">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <span>📂 选择项目文件夹</span>
+      <button class="modal-close" id="browseClose">✕</button>
+    </div>
+    <div class="browse-breadcrumb" id="browseBreadcrumb"></div>
+    <div class="modal-body" style="padding:0;min-height:320px;max-height:50vh">
+      <div id="browseList" class="browse-list"></div>
+    </div>
+    <div class="modal-footer" style="justify-content:space-between">
+      <div id="browseCurrentInfo" style="font-size:12px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px"></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline" id="browseCancel">取消</button>
+        <button class="btn btn-primary" id="browseSelect" disabled>✅ 选择此文件夹</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast 通知 -->
+<div class="toast" id="toast"></div>
+
+<script src="js/app.js"></script>
+</body>
+</html>

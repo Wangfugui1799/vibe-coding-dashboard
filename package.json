@@ -1,0 +1,12 @@
+{
+  "name": "vibe-coding-dashboard",
+  "version": "1.0.0",
+  "description": "Vibe Coding 项目管理仪表盘",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
