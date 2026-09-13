@@ -6,6 +6,16 @@
 
 ---
 
+## 📸 界面预览
+
+### 🌿 Git 状态与多工作树全景 (类 IDE 自由可拖拽分栏 & Worktree 穿梭)
+![Git 状态与多工作树全景](docs/preview-git.png)
+
+### 📋 需求任务流看板 (Kanban)
+![需求看板](docs/preview-kanban.png)
+
+---
+
 ## ✨ 核心特性
 
 - 🌿 **Git 状态与工作流全景**：

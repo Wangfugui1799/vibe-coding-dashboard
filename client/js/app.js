@@ -158,11 +158,18 @@ function initTabs() {
       document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
       btn.classList.add('active');
       document.getElementById(`tab-${tab}`).classList.add('active');
+      window.location.hash = tab;
       if (tab === 'git') startGitRefresh();
       if (tab === 'settings') loadSettings();
       if (tab === 'editor') populateEditorTaskSelect();
     });
   });
+
+  const hashTab = (window.location.hash.slice(1) || '').toLowerCase();
+  const targetBtn = document.querySelector(`.tab-btn[data-tab="${hashTab}"]`);
+  if (targetBtn) {
+    targetBtn.click();
+  }
 }
 
 // ======= Kanban 看板 =======
