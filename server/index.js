@@ -264,6 +264,22 @@ function gitStatus(projectPath) {
     });
   }
 
+  // 关联分支与对应的工作树路径
+  const branchWorktreeMap = {};
+  worktrees.forEach(wt => {
+    if (wt.branch) {
+      branchWorktreeMap[wt.branch] = wt.path;
+    }
+  });
+
+  branches.forEach(b => {
+    const wtPath = branchWorktreeMap[b.name];
+    if (wtPath) {
+      b.worktree_path = wtPath;
+      b.is_active_project = (wtPath === projectPath);
+    }
+  });
+
   return {
     branch, commit,
     changes: { staged, modified, untracked, total: lines.length },
@@ -281,6 +297,30 @@ function gitDiff(projectPath) {
     status: line.slice(0, 2).trim(), file: line.slice(3)
   })) : [];
   return { files };
+}
+
+function gitBranchCommits(projectPath, branch) {
+  if (!projectPath || !fs.existsSync(projectPath)) return { branch: branch || 'HEAD', commits: [] };
+  const args = ['log', '-25', '--pretty=format:%H|%s|%an|%ar|%ai'];
+  if (branch) args.push(branch);
+  const logOut = runGit(args, projectPath);
+  const commits = [];
+  if (logOut) {
+    logOut.split('\n').forEach(line => {
+      const parts = line.split('|');
+      if (parts.length >= 4) {
+        commits.push({
+          hash: parts[0].slice(0, 7),
+          full_hash: parts[0],
+          message: parts[1],
+          author: parts[2],
+          relative_time: parts[3],
+          datetime: parts[4] || ''
+        });
+      }
+    });
+  }
+  return { branch: branch || 'HEAD', commits };
 }
 
 // ======= 路由处理 =======
@@ -412,6 +452,14 @@ async function handleRequest(req, res) {
     const config      = readJSON(CONFIG_FILE, {});
     const projectPath = url.searchParams.get('path') || config.project_path || '';
     return json(res, gitDiff(projectPath));
+  }
+
+  // ---- /api/git/commits (支持按分支获取提交历史) ----
+  if (path_ === '/api/git/commits') {
+    const config      = readJSON(CONFIG_FILE, {});
+    const projectPath = url.searchParams.get('path') || config.project_path || '';
+    const branch      = url.searchParams.get('branch') || '';
+    return json(res, gitBranchCommits(projectPath, branch));
   }
 
   // ---- /api/browse - 文件夹浏览器 ----

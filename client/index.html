@@ -198,13 +198,17 @@
 
       <!-- 栏目 3：提交历史面板 (右侧，宽度自由拖动) -->
       <section class="git-col-panel git-col-timeline" id="colGitTimeline">
-        <div class="git-card git-timeline-card">
-          <div class="git-card-header">
-            <span>📜 提交历史</span>
-            <span class="git-update-time" id="gitUpdateTime">未刷新</span>
+          <div class="git-card git-timeline-card">
+            <div class="git-card-header">
+              <div class="timeline-header-left">
+                <span>📜 提交历史</span>
+                <span class="timeline-branch-badge" id="timelineBranchBadge">🌿 当前分支</span>
+                <button class="btn-text-action" id="btnResetTimelineBranch" style="display:none" title="返回当前活动分支">↺ 返回当前</button>
+              </div>
+              <span class="git-update-time" id="gitUpdateTime">未刷新</span>
+            </div>
+            <div id="gitTimeline" class="git-timeline"></div>
           </div>
-          <div id="gitTimeline" class="git-timeline"></div>
-        </div>
       </section>
 
     </div>

@@ -653,17 +653,28 @@ body.resizing-col * {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 8px;
+  padding: 6px 8px;
   border-radius: var(--radius-sm);
   font-size: 12px;
   font-family: monospace;
-  transition: background 0.1s;
+  transition: all 0.15s ease;
+  cursor: pointer;
+  border: 1px solid transparent;
 }
-.branch-item:hover { background: var(--bg-hover); }
+.branch-item:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-subtle);
+}
 
 .branch-item.current {
-  background: rgba(63,185,80,0.1);
-  border: 1px solid rgba(63,185,80,0.25);
+  background: rgba(63,185,80,0.08);
+  border-color: rgba(63,185,80,0.25);
+}
+
+/* 正在查看的时间线分支高亮态 */
+.branch-item.active-branch-view {
+  background: rgba(88,166,255,0.12);
+  border-color: var(--accent);
 }
 
 .branch-dot {
@@ -700,6 +711,121 @@ body.resizing-col * {
   color: var(--text-muted);
   font-size: 10px;
   flex-shrink: 0;
+}
+
+.branch-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.btn-branch-action {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  font-size: 10px;
+  padding: 1px 5px;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: none;
+}
+.branch-item:hover .btn-branch-action,
+.branch-item.active-branch-view .btn-branch-action {
+  display: inline-flex;
+}
+.btn-branch-action:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.btn-switch-project {
+  background: rgba(63,185,80,0.15);
+  border: 1px solid rgba(63,185,80,0.3);
+  color: var(--green);
+  border-radius: 4px;
+  font-size: 10px;
+  padding: 1px 6px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.btn-switch-project:hover {
+  background: var(--green);
+  color: #000;
+}
+
+/* 工作树切换项目按钮 */
+.wt-switch-btn {
+  background: rgba(88,166,255,0.15);
+  border: 1px solid rgba(88,166,255,0.3);
+  color: var(--accent);
+  border-radius: 11px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 10px;
+  height: 22px;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.wt-switch-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.wt-active-badge {
+  background: rgba(63,185,80,0.25);
+  border: 1px solid rgba(63,185,80,0.5);
+  color: var(--green);
+  border-radius: 11px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 0 10px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+/* 提交历史头部指示器 */
+.timeline-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.timeline-branch-badge {
+  background: rgba(88,166,255,0.15);
+  border: 1px solid rgba(88,166,255,0.3);
+  color: var(--accent);
+  border-radius: 8px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-family: monospace;
+  font-weight: 600;
+}
+
+.btn-text-action {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 4px;
+  text-decoration: underline;
+  transition: opacity 0.15s;
+}
+.btn-text-action:hover {
+  opacity: 0.8;
 }
 
 /* ---- 工作树 ---- */

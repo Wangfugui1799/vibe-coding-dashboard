@@ -527,11 +527,26 @@ async function refreshGitStatus() {
     document.getElementById('gitUpdateTime').textContent =
       `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')} 更新`;
 
+    // 记录活动分支
+    currentActiveBranch = data.branch || 'main';
+
     // 变更文件列表
     renderGitFiles();
 
-    // 提交历史
-    renderTimeline(data.commits || []);
+    // 提交历史 (若用户手动选了分支则保持，否则展示活动分支)
+    const badge = document.getElementById('timelineBranchBadge');
+    const resetBtn = document.getElementById('btnResetTimelineBranch');
+
+    if (!currentViewingBranch || currentViewingBranch === currentActiveBranch) {
+      currentViewingBranch = currentActiveBranch;
+      renderTimeline(data.commits || []);
+      if (badge) badge.textContent = `🌿 ${currentActiveBranch}`;
+      if (resetBtn) resetBtn.style.display = 'none';
+    } else {
+      // 保持当前用户选择的分支
+      if (badge) badge.textContent = `🌿 ${currentViewingBranch}`;
+      if (resetBtn) resetBtn.style.display = 'inline-block';
+    }
 
     // 分支列表
     renderBranches(data.branches || []);
@@ -589,6 +604,61 @@ function renderTimeline(commits) {
     </div>`).join('');
 }
 
+// ======= 分支查看与项目路径快速切换 =======
+let currentActiveBranch = '';
+let currentViewingBranch = '';
+
+// 切换当前查看的项目目录 (基于配置更新)
+async function switchProjectDirectory(newPath) {
+  if (!newPath) return;
+  try {
+    showToast(`正在切换项目到: ${newPath}...`, 'info');
+    await api('/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ project_path: newPath })
+    });
+    showToast('项目已成功切换！🎉', 'success');
+    currentViewingBranch = ''; // 重置为新项目的默认分支
+    await loadTasks();
+    await loadConfig();
+    await refreshGitStatus();
+  } catch (e) {
+    showToast('切换项目失败: ' + (e.message || e), 'error');
+  }
+}
+
+// 切换查看指定分支的历史时间线
+async function viewBranchTimeline(branchName) {
+  if (!branchName) return;
+  currentViewingBranch = branchName;
+
+  // 更新分支列表高亮状态
+  document.querySelectorAll('.branch-item').forEach(el => {
+    if (el.dataset.branch === branchName) {
+      el.classList.add('active-branch-view');
+    } else {
+      el.classList.remove('active-branch-view');
+    }
+  });
+
+  // 更新时间线头部指示器与重置按钮
+  const badge = document.getElementById('timelineBranchBadge');
+  const resetBtn = document.getElementById('btnResetTimelineBranch');
+  if (badge) badge.textContent = `🌿 ${branchName}`;
+  if (resetBtn) {
+    resetBtn.style.display = (branchName === currentActiveBranch) ? 'none' : 'inline-block';
+  }
+
+  // 异步加载该分支提交历史
+  try {
+    const res = await api(`/git/commits?branch=${encodeURIComponent(branchName)}`);
+    renderTimeline(res.commits || []);
+    showToast(`已切换查看分支: ${branchName}`, 'info');
+  } catch (e) {
+    showToast('获取该分支历史失败', 'error');
+  }
+}
+
 function renderBranches(branches) {
   const el = document.getElementById('gitBranchList');
   const countEl = document.getElementById('branchCount');
@@ -610,19 +680,55 @@ function renderBranches(branches) {
   ];
 
   sorted.forEach(b => {
-    const cls = b.is_current ? ' current' : '';
-    const dotCls = b.is_current ? 'current-dot' : (b.is_remote ? 'remote' : 'local');
-    const badge = b.is_current ? '<span class="branch-current-badge">当前</span>' :
+    const isCur = b.is_current;
+    const isViewing = (b.name === currentViewingBranch);
+    const cls = (isCur ? ' current' : '') + (isViewing ? ' active-branch-view' : '');
+    const dotCls = isCur ? 'current-dot' : (b.is_remote ? 'remote' : 'local');
+    const badge = isCur ? '<span class="branch-current-badge">活动</span>' :
                   b.is_remote ? '<span class="branch-remote-badge">远程</span>' : '';
-    html += `<div class="branch-item${cls}">
+
+    // 若关联工作树目录且不是当前查看项目，提供「📂 切为此项目」按钮
+    let switchBtn = '';
+    if (b.worktree_path) {
+      if (!b.is_active_project) {
+        switchBtn = `<button class="btn-switch-project" data-wt-path="${escHtml(b.worktree_path)}" title="切换整个看板到此工作树项目">📂 切为此项目</button>`;
+      } else {
+        switchBtn = `<span style="color:var(--green);font-size:10px;font-weight:600">当前项目</span>`;
+      }
+    }
+
+    html += `<div class="branch-item${cls}" data-branch="${escHtml(b.name)}" title="点击切换查看此分支提交历史">
       <span class="branch-dot ${dotCls}"></span>
       <span class="branch-name" title="${escHtml(b.name)}">${escHtml(b.name)}</span>
       <span class="branch-hash">${b.hash}</span>
       ${badge}
+      <div class="branch-actions">
+        ${switchBtn}
+        <button class="btn-branch-action" data-branch="${escHtml(b.name)}" title="查看该分支提交历史">📜 历史</button>
+      </div>
     </div>`;
   });
 
   el.innerHTML = html;
+
+  // 绑定分支项点击查看时间线
+  el.querySelectorAll('.branch-item').forEach(item => {
+    item.addEventListener('click', (e) => {
+      // 若点击的是切换项目按钮，则不触发分支查看
+      if (e.target.closest('.btn-switch-project')) return;
+      const bName = item.dataset.branch;
+      if (bName) viewBranchTimeline(bName);
+    });
+  });
+
+  // 绑定「📂 切为此项目」按钮
+  el.querySelectorAll('.btn-switch-project').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const p = btn.dataset.wtPath;
+      if (p) switchProjectDirectory(p);
+    });
+  });
 }
 
 function renderWorktrees(worktrees) {
@@ -635,8 +741,12 @@ function renderWorktrees(worktrees) {
   }
   countEl.textContent = `${worktrees.length} 个工作树`;
 
+  // 获取当前配置的项目路径
+  const currentPath = currentConfig?.project_path || '';
+
   el.innerHTML = worktrees.map((wt, i) => {
     const isMain = wt.is_main || i === 0;
+    const isCurActive = (wt.path === currentPath) || (!currentPath && isMain);
     const mainCls = isMain ? ' main-wt' : '';
     const icon = isMain ? '🏠' : '🌳';
     const badge = isMain ? '<span class="wt-badge main">主工作树</span>' :
@@ -654,6 +764,14 @@ function renderWorktrees(worktrees) {
       } else {
         statusBadge = `<span class="wt-status-badge dirty">${wt.changes.total} 个修改 ⚠️</span>`;
       }
+    }
+
+    // 设为当前项目按钮 / 当前项目徽章
+    let projectActionBadge = '';
+    if (isCurActive) {
+      projectActionBadge = '<span class="wt-active-badge">当前项目 ✓</span>';
+    } else {
+      projectActionBadge = `<button class="wt-switch-btn" data-wt-path="${escHtml(wt.path)}" title="切换整个看板到此工作树项目">🎯 设为当前项目</button>`;
     }
 
     // 最新提交
@@ -679,6 +797,7 @@ function renderWorktrees(worktrees) {
           </div>
           <div class="wt-badges">
             ${statusBadge}
+            ${projectActionBadge}
             ${badge}
           </div>
         </div>
@@ -704,6 +823,15 @@ function renderWorktrees(worktrees) {
       }).catch(() => {
         showToast('复制失败，请手动复制', 'error');
       });
+    });
+  });
+
+  // 绑定「🎯 设为当前项目」按钮
+  el.querySelectorAll('.wt-switch-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const p = btn.dataset.wtPath;
+      if (p) switchProjectDirectory(p);
     });
   });
 }
@@ -911,6 +1039,14 @@ function startGitRefresh() {
 
 function initGit() {
   document.getElementById('gitRefreshBtn').addEventListener('click', refreshGitStatus);
+  const resetBranchBtn = document.getElementById('btnResetTimelineBranch');
+  if (resetBranchBtn) {
+    resetBranchBtn.addEventListener('click', () => {
+      currentViewingBranch = '';
+      refreshGitStatus();
+      showToast('已切回当前活动分支时间线', 'info');
+    });
+  }
   initGitResizers();
 }
 
