@@ -177,29 +177,64 @@ function gitStatus(projectPath) {
   }
 
   // ---- 工作树 (worktree) ----
-  const worktrees = [];
+  const rawWorktrees = [];
   const wtOut = runGit(['worktree', 'list', '--porcelain'], projectPath);
   if (wtOut) {
     let wt = {};
     wtOut.split('\n').forEach(line => {
       if (line.startsWith('worktree ')) {
-        if (wt.path) worktrees.push(wt);
+        if (wt.path) rawWorktrees.push(wt);
         wt = { path: line.slice(9) };
       } else if (line.startsWith('HEAD ')) {
-        wt.head = line.slice(5, 12); // short hash
+        wt.head = line.slice(5, 12);
+        wt.full_head = line.slice(5);
       } else if (line.startsWith('branch ')) {
         wt.branch = line.slice(7).replace('refs/heads/', '');
       } else if (line === 'bare') {
         wt.bare = true;
       } else if (line === 'detached') {
         wt.detached = true;
+      } else if (line === 'locked') {
+        wt.locked = true;
+      } else if (line === 'prunable') {
+        wt.prunable = true;
       } else if (line === '') {
-        if (wt.path) worktrees.push(wt);
+        if (wt.path) rawWorktrees.push(wt);
         wt = {};
       }
     });
-    if (wt.path) worktrees.push(wt);
+    if (wt.path) rawWorktrees.push(wt);
   }
+
+  const worktrees = rawWorktrees.map((wt, index) => {
+    const isMain = index === 0 || wt.path === projectPath;
+    let commit = null;
+    let changes = null;
+
+    if (fs.existsSync(wt.path)) {
+      const wtLog = runGit(['log', '-1', '--pretty=format:%H|%s|%an|%ar'], wt.path);
+      if (wtLog) {
+        const [h, s, a, t] = wtLog.split('|');
+        commit = { hash: h?.slice(0, 7), full_hash: h, message: s, author: a, time: t };
+      }
+
+      const wtStatus = runGit(['status', '--porcelain'], wt.path);
+      if (wtStatus !== null) {
+        const lines = wtStatus ? wtStatus.split('\n').filter(Boolean) : [];
+        changes = {
+          clean: lines.length === 0,
+          total: lines.length
+        };
+      }
+    }
+
+    return {
+      ...wt,
+      is_main: isMain,
+      commit,
+      changes
+    };
+  });
 
   // ---- Stash 列表 ----
   const stashes = [];

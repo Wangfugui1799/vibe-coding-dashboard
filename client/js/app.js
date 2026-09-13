@@ -633,29 +633,79 @@ function renderWorktrees(worktrees) {
     countEl.textContent = '';
     return;
   }
-  countEl.textContent = `${worktrees.length} 个`;
+  countEl.textContent = `${worktrees.length} 个工作树`;
 
   el.innerHTML = worktrees.map((wt, i) => {
-    const isMain = i === 0;
+    const isMain = wt.is_main || i === 0;
     const mainCls = isMain ? ' main-wt' : '';
     const icon = isMain ? '🏠' : '🌳';
     const badge = isMain ? '<span class="wt-badge main">主工作树</span>' :
-                           '<span class="wt-badge linked">链接</span>';
-    const branchInfo = wt.branch ? `<span class="wt-branch">🌿 ${escHtml(wt.branch)}</span>` :
-                       wt.detached ? '<span style="color:var(--orange);font-size:11px">HEAD 已分离</span>' :
-                       wt.bare ? '<span style="color:var(--text-muted);font-size:11px">裸仓库</span>' : '';
+                           '<span class="wt-badge linked">链接工作树</span>';
+
+    const branchName = wt.branch || (wt.detached ? 'HEAD (分离)' : (wt.bare ? '裸仓库' : '未知分支'));
+    const branchInfo = `<span class="wt-branch">🌿 ${escHtml(branchName)}</span>`;
     const headInfo = wt.head ? `<span class="wt-head">@ ${wt.head}</span>` : '';
 
-    return `<div class="wt-item${mainCls}">
-      <div class="wt-header">
-        <span class="wt-icon">${icon}</span>
-        ${branchInfo}
-        ${headInfo}
-        ${badge}
-      </div>
-      <div class="wt-path" title="${escHtml(wt.path)}">${escHtml(wt.path)}</div>
-    </div>`;
+    // 状态标签
+    let statusBadge = '';
+    if (wt.changes) {
+      if (wt.changes.clean) {
+        statusBadge = '<span class="wt-status-badge clean">工作区干净 ✨</span>';
+      } else {
+        statusBadge = `<span class="wt-status-badge dirty">${wt.changes.total} 个修改 ⚠️</span>`;
+      }
+    }
+
+    // 最新提交
+    let commitBlock = '';
+    if (wt.commit) {
+      commitBlock = `
+        <div class="wt-commit-box">
+          <div class="wt-commit-top">
+            <span class="wt-commit-hash">${wt.commit.hash}</span>
+            <span class="wt-commit-msg" title="${escHtml(wt.commit.message)}">${escHtml(wt.commit.message)}</span>
+          </div>
+          <div class="wt-commit-meta">${escHtml(wt.commit.author || '')} · ${wt.commit.time || ''}</div>
+        </div>`;
+    }
+
+    return `
+      <div class="wt-item${mainCls}">
+        <div class="wt-top-row">
+          <div class="wt-header">
+            <span class="wt-icon">${icon}</span>
+            ${branchInfo}
+            ${headInfo}
+          </div>
+          <div class="wt-badges">
+            ${statusBadge}
+            ${badge}
+          </div>
+        </div>
+
+        <div class="wt-path-container">
+          <span class="wt-path-label">路径:</span>
+          <span class="wt-path-text">${escHtml(wt.path)}</span>
+          <button class="wt-copy-path-btn" data-path="${escHtml(wt.path)}" title="复制完整路径">📋 复制</button>
+        </div>
+
+        ${commitBlock}
+      </div>`;
   }).join('');
+
+  // 绑定复制完整路径事件
+  el.querySelectorAll('.wt-copy-path-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const p = btn.dataset.path;
+      if (!p) return;
+      navigator.clipboard.writeText(p).then(() => {
+        showToast('📋 工作树路径已复制！', 'success');
+      }).catch(() => {
+        showToast('复制失败，请手动复制', 'error');
+      });
+    });
+  });
 }
 
 function renderStashes(stashes) {
@@ -695,6 +745,164 @@ function renderTags(tags) {
     </div>`).join('');
 }
 
+// ======= Git 自由拖拽分栏与本地记忆 =======
+const STORAGE_KEY_GIT_LAYOUT = 'vibe_git_layout_v1';
+
+function restoreGitLayout() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_GIT_LAYOUT);
+    if (!saved) return;
+    const { overviewWidth, worktreeFlex, timelineFlex } = JSON.parse(saved);
+    const colOverview = document.getElementById('colGitOverview');
+    const colWorktree = document.getElementById('colGitWorktree');
+    const colTimeline = document.getElementById('colGitTimeline');
+
+    if (overviewWidth && colOverview) {
+      colOverview.style.width = `${overviewWidth}px`;
+    }
+    if (worktreeFlex && timelineFlex && colWorktree && colTimeline) {
+      colWorktree.style.flex = `${worktreeFlex} 1 0%`;
+      colTimeline.style.flex = `${timelineFlex} 1 0%`;
+    }
+  } catch (e) {}
+}
+
+function saveGitLayout() {
+  try {
+    const colOverview = document.getElementById('colGitOverview');
+    const colWorktree = document.getElementById('colGitWorktree');
+    const colTimeline = document.getElementById('colGitTimeline');
+
+    if (!colOverview || !colWorktree || !colTimeline) return;
+
+    const overviewWidth = colOverview.getBoundingClientRect().width;
+    const worktreeWidth = colWorktree.getBoundingClientRect().width;
+    const timelineWidth = colTimeline.getBoundingClientRect().width;
+
+    const totalRight = worktreeWidth + timelineWidth;
+    const worktreeFlex = totalRight > 0 ? (worktreeWidth / totalRight) * 2 : 1;
+    const timelineFlex = totalRight > 0 ? (timelineWidth / totalRight) * 2 : 1;
+
+    localStorage.setItem(STORAGE_KEY_GIT_LAYOUT, JSON.stringify({
+      overviewWidth: Math.round(overviewWidth),
+      worktreeFlex: Number(worktreeFlex.toFixed(3)),
+      timelineFlex: Number(timelineFlex.toFixed(3))
+    }));
+  } catch (e) {}
+}
+
+function resetGitLayout() {
+  try {
+    localStorage.removeItem(STORAGE_KEY_GIT_LAYOUT);
+    const colOverview = document.getElementById('colGitOverview');
+    const colWorktree = document.getElementById('colGitWorktree');
+    const colTimeline = document.getElementById('colGitTimeline');
+    if (colOverview) colOverview.style.width = '';
+    if (colWorktree) colWorktree.style.flex = '';
+    if (colTimeline) colTimeline.style.flex = '';
+    showToast('已恢复默认三栏布局 ✨', 'success');
+  } catch (e) {}
+}
+
+function initGitResizers() {
+  restoreGitLayout();
+
+  const resizer1 = document.getElementById('resizerOverview');
+  const resizer2 = document.getElementById('resizerWorktree');
+  const colOverview = document.getElementById('colGitOverview');
+  const colWorktree = document.getElementById('colGitWorktree');
+  const colTimeline = document.getElementById('colGitTimeline');
+  const btnReset = document.getElementById('btnResetGitLayout');
+
+  if (btnReset) {
+    btnReset.addEventListener('click', resetGitLayout);
+  }
+
+  // ---- 分割条 1: 拖拽左侧概览栏宽度 ----
+  if (resizer1 && colOverview) {
+    let startX = 0;
+    let startWidth = 0;
+
+    const onMouseMove1 = (e) => {
+      const dx = e.clientX - startX;
+      const newWidth = Math.max(200, Math.min(600, startWidth + dx));
+      colOverview.style.width = `${newWidth}px`;
+    };
+
+    const onMouseUp1 = () => {
+      document.body.classList.remove('resizing-col');
+      resizer1.classList.remove('is-dragging');
+      document.removeEventListener('mousemove', onMouseMove1);
+      document.removeEventListener('mouseup', onMouseUp1);
+      saveGitLayout();
+    };
+
+    resizer1.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      startX = e.clientX;
+      startWidth = colOverview.getBoundingClientRect().width;
+      document.body.classList.add('resizing-col');
+      resizer1.classList.add('is-dragging');
+      document.addEventListener('mousemove', onMouseMove1);
+      document.addEventListener('mouseup', onMouseUp1);
+    });
+
+    // 双击恢复默认左栏宽度
+    resizer1.addEventListener('dblclick', () => {
+      colOverview.style.width = '280px';
+      saveGitLayout();
+      showToast('左栏已恢复默认宽度', 'info');
+    });
+  }
+
+  // ---- 分割条 2: 拖拽工作树与提交历史的宽度比例 ----
+  if (resizer2 && colWorktree && colTimeline) {
+    let startX = 0;
+    let startWtWidth = 0;
+    let startTlWidth = 0;
+
+    const onMouseMove2 = (e) => {
+      const dx = e.clientX - startX;
+      const totalWidth = startWtWidth + startTlWidth;
+      const newWtWidth = Math.max(200, Math.min(totalWidth - 200, startWtWidth + dx));
+      const newTlWidth = totalWidth - newWtWidth;
+
+      const wtFlex = (newWtWidth / totalWidth) * 2;
+      const tlFlex = (newTlWidth / totalWidth) * 2;
+
+      colWorktree.style.flex = `${wtFlex} 1 0%`;
+      colTimeline.style.flex = `${tlFlex} 1 0%`;
+    };
+
+    const onMouseUp2 = () => {
+      document.body.classList.remove('resizing-col');
+      resizer2.classList.remove('is-dragging');
+      document.removeEventListener('mousemove', onMouseMove2);
+      document.removeEventListener('mouseup', onMouseUp2);
+      saveGitLayout();
+    };
+
+    resizer2.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      startX = e.clientX;
+      startWtWidth = colWorktree.getBoundingClientRect().width;
+      startTlWidth = colTimeline.getBoundingClientRect().width;
+      document.body.classList.add('resizing-col');
+      resizer2.classList.add('is-dragging');
+      document.addEventListener('mousemove', onMouseMove2);
+      document.addEventListener('mouseup', onMouseUp2);
+    });
+
+    // 双击等分右侧双栏
+    resizer2.addEventListener('dblclick', () => {
+      colWorktree.style.flex = '1 1 0%';
+      colTimeline.style.flex = '1 1 0%';
+      saveGitLayout();
+      showToast('工作树与提交历史已等分', 'info');
+    });
+  }
+}
+
 function startGitRefresh() {
   if (gitRefreshTimer) clearInterval(gitRefreshTimer);
   refreshGitStatus();
@@ -703,6 +911,7 @@ function startGitRefresh() {
 
 function initGit() {
   document.getElementById('gitRefreshBtn').addEventListener('click', refreshGitStatus);
+  initGitResizers();
 }
 
 // ======= Prompt 编辑器 =======

@@ -92,11 +92,21 @@
   </section>
 
   <!-- ===== TAB: Git 状态 ===== -->
+  <!-- ===== TAB: Git 状态 ===== -->
   <section class="tab-panel" id="tab-git">
-    <div class="git-layout">
+    <!-- 顶部布局提示与快捷重置栏 -->
+    <div class="git-top-bar">
+      <div class="git-top-title">🌿 Git 实时状态与工作流看板</div>
+      <div class="git-top-actions">
+        <span class="git-tip-hint">💡 鼠标按住竖线左右拖动可自由调整栏宽，双击恢复等分</span>
+        <button class="btn btn-sm btn-outline" id="btnResetGitLayout" title="恢复默认三栏布局">🔄 默认布局</button>
+      </div>
+    </div>
 
-      <!-- 左：状态概览 -->
-      <div class="git-overview">
+    <div class="git-layout" id="gitLayout">
+
+      <!-- 栏目 1：左侧概览 (当前分支/最新Commit/工作区状态/变更文件/分支/Stash/Tags) -->
+      <aside class="git-col-panel git-col-overview" id="colGitOverview">
         <div class="git-card">
           <div class="git-card-header">
             <span>🌿 当前分支</span>
@@ -146,15 +156,6 @@
           <div id="gitBranchList" class="git-branch-list"></div>
         </div>
 
-        <!-- 工作树 -->
-        <div class="git-card">
-          <div class="git-card-header">
-            <span>🌳 工作树 (Worktree)</span>
-            <span class="git-update-time" id="worktreeCount"></span>
-          </div>
-          <div id="gitWorktreeList" class="git-worktree-list"></div>
-        </div>
-
         <!-- Stash -->
         <div class="git-card">
           <div class="git-card-header">
@@ -172,19 +173,39 @@
           </div>
           <div id="gitTagList" class="git-tag-list"></div>
         </div>
+      </aside>
 
+      <!-- 分割条 1 (左栏与工作树之间) -->
+      <div class="git-resizer" id="resizerOverview" title="按住左右拖动调整宽度，双击自动平分">
+        <div class="resizer-handle"></div>
       </div>
 
-      <!-- 右：提交历史时间线 -->
-      <div class="git-timeline-panel">
-        <div class="git-card" style="height:100%">
+      <!-- 栏目 2：工作树面板 (中间，宽度自由拖动) -->
+      <section class="git-col-panel git-col-worktree" id="colGitWorktree">
+        <div class="git-card git-worktree-card">
+          <div class="git-card-header">
+            <span>🌳 工作树 (Worktree)</span>
+            <span class="git-update-time" id="worktreeCount"></span>
+          </div>
+          <div id="gitWorktreeList" class="git-worktree-list"></div>
+        </div>
+      </section>
+
+      <!-- 分割条 2 (工作树与提交历史之间) -->
+      <div class="git-resizer" id="resizerWorktree" title="按住左右拖动调整宽度，双击自动平分">
+        <div class="resizer-handle"></div>
+      </div>
+
+      <!-- 栏目 3：提交历史面板 (右侧，宽度自由拖动) -->
+      <section class="git-col-panel git-col-timeline" id="colGitTimeline">
+        <div class="git-card git-timeline-card">
           <div class="git-card-header">
             <span>📜 提交历史</span>
             <span class="git-update-time" id="gitUpdateTime">未刷新</span>
           </div>
           <div id="gitTimeline" class="git-timeline"></div>
         </div>
-      </div>
+      </section>
 
     </div>
   </section>

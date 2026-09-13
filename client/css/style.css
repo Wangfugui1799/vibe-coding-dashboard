@@ -368,30 +368,163 @@ select {
 }
 select:focus { border-color: var(--accent); }
 
-/* ======= Git Panel ======= */
-#tab-git { flex-direction: row; overflow: hidden; }
-
-.git-layout {
-  display: flex;
-  gap: 0;
+/* ======= Git Panel (可自由拖拽三栏布局) ======= */
+#tab-git {
+  display: none;
   height: 100%;
-  width: 100%;
+  flex-direction: column;
   overflow: hidden;
 }
-
-.git-overview {
-  width: 320px;
-  min-width: 280px;
-  padding: 16px;
-  overflow-y: auto;
-  border-right: 1px solid var(--border);
+#tab-git.active {
   display: flex;
-  flex-direction: column;
+}
+
+.git-top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  height: 42px;
+  flex-shrink: 0;
+}
+
+.git-top-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.git-top-actions {
+  display: flex;
+  align-items: center;
   gap: 12px;
 }
 
-.git-overview::-webkit-scrollbar { width: 4px; }
-.git-overview::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.git-tip-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.git-layout {
+  display: flex;
+  flex-direction: row;
+  height: calc(100% - 42px);
+  width: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+/* 三栏通用面板样式 */
+.git-col-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  min-width: 180px;
+}
+
+/* 栏目 1：左侧概览栏 */
+.git-col-overview {
+  width: 280px;
+  flex-shrink: 0;
+  padding: 14px;
+  overflow-y: auto;
+  gap: 12px;
+}
+.git-col-overview::-webkit-scrollbar { width: 4px; }
+.git-col-overview::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* 栏目 2：工作树面板 */
+.git-col-worktree {
+  flex: 1;
+  padding: 14px;
+  min-width: 240px;
+}
+
+.git-col-worktree .git-worktree-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 栏目 3：提交历史面板 */
+.git-col-timeline {
+  flex: 1.1;
+  padding: 14px;
+  min-width: 240px;
+}
+
+.git-col-timeline .git-timeline-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ======= 可拖拽分割条 (Splitter) ======= */
+.git-resizer {
+  width: 10px;
+  margin: 0 -5px;
+  z-index: 20;
+  cursor: col-resize;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+
+.git-resizer::after {
+  content: '';
+  width: 2px;
+  height: 100%;
+  background: var(--border);
+  transition: all 0.2s ease;
+}
+
+.git-resizer:hover::after,
+.git-resizer.is-dragging::after {
+  width: 4px;
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(88, 166, 255, 0.6);
+}
+
+.git-resizer .resizer-handle {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 36px;
+  border-radius: 3px;
+  background: var(--border);
+  opacity: 0.7;
+  pointer-events: none;
+  transition: all 0.2s;
+}
+
+.git-resizer:hover .resizer-handle,
+.git-resizer.is-dragging .resizer-handle {
+  background: var(--accent);
+  opacity: 1;
+  height: 52px;
+}
+
+body.resizing-col {
+  user-select: none !important;
+  cursor: col-resize !important;
+}
+body.resizing-col * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
 
 .git-card {
   background: var(--bg-surface);
@@ -496,9 +629,8 @@ select:focus { border-color: var(--accent); }
 
 .git-update-time { color: var(--text-muted); font-size: 11px; }
 
-/* ---- 分支列表 ---- */
+/* ---- 分支列表 / Stash / Tag ---- */
 .git-branch-list,
-.git-worktree-list,
 .git-stash-list,
 .git-tag-list {
   max-height: 220px;
@@ -571,60 +703,176 @@ select:focus { border-color: var(--accent); }
 }
 
 /* ---- 工作树 ---- */
+.git-worktree-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 4px;
+}
+
 .wt-item {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 8px;
-  border-radius: var(--radius-sm);
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
   background: var(--bg-base);
-  border: 1px solid var(--border-subtle);
-  margin-bottom: 4px;
+  border: 1px solid var(--border);
+  transition: all 0.2s ease;
+}
+
+.wt-item:hover {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-sm);
 }
 
 .wt-item.main-wt {
-  border-color: rgba(63,185,80,0.25);
+  border-color: rgba(63,185,80,0.35);
   background: rgba(63,185,80,0.03);
 }
 
+.wt-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .wt-header {
-  display: flex; align-items: center; gap: 6px; font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.wt-icon { font-size: 14px; flex-shrink: 0; }
-
-.wt-path {
-  font-family: monospace;
-  font-size: 11px;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.wt-icon { font-size: 16px; flex-shrink: 0; }
 
 .wt-branch {
   color: var(--green);
-  font-weight: 600;
+  font-weight: 700;
   font-family: monospace;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .wt-head {
   color: var(--purple);
   font-family: monospace;
-  font-size: 11px;
+  font-size: 12px;
+}
+
+.wt-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .wt-badge {
-  padding: 1px 6px;
-  border-radius: 8px;
-  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
   font-weight: 600;
   flex-shrink: 0;
 }
 
 .wt-badge.main { background: rgba(63,185,80,0.2); color: var(--green); }
 .wt-badge.linked { background: rgba(88,166,255,0.15); color: var(--accent); }
+
+.wt-status-badge {
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.wt-status-badge.clean {
+  background: rgba(63,185,80,0.15);
+  color: var(--green);
+}
+.wt-status-badge.dirty {
+  background: rgba(210,153,34,0.15);
+  color: var(--orange);
+}
+
+.wt-path-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.wt-path-label {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.wt-path-text {
+  flex: 1;
+  font-family: monospace;
+  color: var(--text-primary);
+  word-break: break-all;
+  line-height: 1.4;
+  user-select: text;
+}
+
+.wt-copy-path-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.wt-copy-path-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+.wt-commit-box {
+  background: var(--bg-surface);
+  border-left: 3px solid var(--purple);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wt-commit-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.wt-commit-hash {
+  font-family: monospace;
+  color: var(--purple);
+  font-weight: 700;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.wt-commit-msg {
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.wt-commit-meta {
+  color: var(--text-muted);
+  font-size: 11px;
+}
 
 /* ---- Stash ---- */
 .stash-item {
