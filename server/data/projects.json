@@ -1,0 +1,21 @@
+{
+  "active_project_id": "proj_1789292774357_lusk",
+  "projects": [
+    {
+      "id": "proj_default",
+      "name": "NewEP",
+      "path": "/Users/apple/Documents/ap/EasyInput/NewEP",
+      "color": "#58a6ff",
+      "icon": "⚡",
+      "created_at": "2026-09-13T09:35:59.283Z"
+    },
+    {
+      "id": "proj_1789292774357_lusk",
+      "name": "ToDoList",
+      "path": "/Users/apple/Documents/AIcoding/Anti项目/ToDoList",
+      "color": "#d29922",
+      "icon": "📁",
+      "created_at": "2026-09-13T09:46:14.357Z"
+    }
+  ]
+}

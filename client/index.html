@@ -14,7 +14,35 @@
 <header class="header">
   <div class="header-left">
     <span class="logo">⚡ Vibe Coding</span>
-    <span class="project-name" id="projectName">仪表盘</span>
+    <div class="project-switcher" id="projectSwitcher">
+      <button class="project-switcher-btn" id="projectSwitcherBtn" title="点击切换项目">
+        <span class="project-badge-dot" id="projectBadgeDot"></span>
+        <span class="project-switcher-name" id="projectName">仪表盘</span>
+        <span class="project-switcher-arrow">▾</span>
+      </button>
+
+      <!-- 下拉选择面板 -->
+      <div class="project-dropdown" id="projectDropdown">
+        <div class="dropdown-header">
+          <span class="dropdown-title">📁 项目工作区</span>
+          <span class="dropdown-count" id="projectCountBadge">0 个项目</span>
+        </div>
+        <div class="dropdown-search">
+          <input type="text" id="projectSearchInput" placeholder="🔍 快速搜索项目..." autocomplete="off" />
+        </div>
+        <div class="project-list" id="projectDropdownList">
+          <!-- 动态渲染项目列表 -->
+        </div>
+        <div class="dropdown-footer">
+          <button class="dropdown-action-btn" id="btnQuickNewProject">
+            <span>＋</span> 新建/关联项目
+          </button>
+          <button class="dropdown-action-btn" id="btnQuickManageProjects">
+            <span>⚙️</span> 管理所有项目
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
   <div class="header-center">
     <nav class="tab-nav">
@@ -93,7 +121,7 @@
 
   <!-- ===== TAB: Git 状态 ===== -->
   <!-- ===== TAB: Git 状态 ===== -->
-  <section class="tab-panel" id="tab-git">
+  <section class="tab-panel" id="tab-git" style="position:relative;">
     <!-- 顶部布局提示与快捷重置栏 -->
     <div class="git-top-bar">
       <div class="git-top-title">🌿 Git 实时状态与工作流看板</div>
@@ -101,6 +129,14 @@
         <span class="git-tip-hint">💡 鼠标按住竖线左右拖动可自由调整栏宽，双击恢复等分</span>
         <button class="btn btn-sm btn-outline" id="btnResetGitLayout" title="恢复默认三栏布局">🔄 默认布局</button>
       </div>
+    </div>
+
+    <!-- 未配置路径时的覆盖提示（不替换 git-layout DOM，只做显示/隐藏） -->
+    <div id="gitNoConfigPanel" style="display:none; position:absolute; inset:0; z-index:10; align-items:center; justify-content:center; flex-direction:column; gap:16px; background:var(--bg-panel,#161b22); border-radius:12px;">
+      <div style="font-size:48px;">🌿</div>
+      <div style="font-size:16px;color:var(--text-secondary);font-weight:600;" id="gitNoConfigMsg">尚未配置 Git 项目路径</div>
+      <div style="color:var(--text-muted,#8b949e); font-size:13px;" id="gitNoConfigDetail">请在设置中填写你的项目路径</div>
+      <button class="btn btn-primary" onclick="document.querySelector('[data-tab=settings]').click()">⚙️ 前往设置</button>
     </div>
 
     <div class="git-layout" id="gitLayout">
@@ -283,10 +319,24 @@
   <!-- ===== TAB: 设置 ===== -->
   <section class="tab-panel" id="tab-settings">
     <div class="settings-layout">
+      <!-- 多项目管理卡片 -->
+      <div class="settings-card settings-card-wide">
+        <div class="settings-card-header">
+          <div>
+            <h2>📁 多项目工作区管理</h2>
+            <div class="card-subtitle">支持保存多个独立项目的需求看板，数据物理隔离，随时无缝切换</div>
+          </div>
+          <button class="btn btn-primary btn-sm" id="btnAddNewProject">＋ 新增项目</button>
+        </div>
+        <div class="project-manage-list" id="projectManageList">
+          <!-- 动态渲染项目管理列表 -->
+        </div>
+      </div>
+
       <div class="settings-card">
-        <h2>⚙️ 项目设置</h2>
+        <h2>⚙️ 当前项目配置</h2>
         <div class="form-group">
-          <label>项目名称</label>
+          <label>当前项目名称</label>
           <input type="text" id="settingProjectName" placeholder="我的项目" />
         </div>
         <div class="form-group">
@@ -295,13 +345,13 @@
             <input type="text" id="settingProjectPath" placeholder="/Users/yourname/yourproject" style="flex:1" />
             <button class="btn btn-outline btn-sm" id="btnBrowseFolder">📂 浏览选择</button>
           </div>
-          <div class="form-hint">填写你的 Vibe Coding 目标项目的本地绝对路径，或点击「浏览选择」</div>
+          <div class="form-hint">填写当前活跃项目的本地绝对路径，或点击「浏览选择」</div>
         </div>
         <div class="form-group">
           <label>Git 自动刷新间隔（秒）</label>
           <input type="number" id="settingRefreshInterval" value="5" min="2" max="60" />
         </div>
-        <button class="btn btn-primary" id="btnSaveSettings">💾 保存设置</button>
+        <button class="btn btn-primary" id="btnSaveSettings">💾 保存当前设置</button>
         <div id="settingMsg" class="setting-msg"></div>
       </div>
 
@@ -385,15 +435,61 @@
   </div>
 </div>
 
+<!-- ======= 新建/编辑项目 模态框 ======= -->
+<div class="modal-overlay" id="projectModal">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <span id="projectModalTitle">新建项目</span>
+      <button class="modal-close" id="projectModalClose">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="editProjectId" value="" />
+      <div class="form-group">
+        <label>项目名称 *</label>
+        <input type="text" id="projectModalName" placeholder="例如：电商管理端、独立博客、移动端..." autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label>本地 Git 仓库路径</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="text" id="projectModalPath" placeholder="/Users/yourname/yourproject" style="flex:1" autocomplete="off" />
+          <button class="btn btn-outline btn-sm" id="btnBrowseModalPath">📂 浏览选择</button>
+        </div>
+        <div class="form-hint">关联本地 Git 仓库或项目根目录（可自动探测 Git 分支与状态）</div>
+      </div>
+      <div class="form-group">
+        <label>标识颜色</label>
+        <div class="color-picker-group" id="projectColorPicker">
+          <button type="button" class="color-swatch active" data-color="#58a6ff" style="background:#58a6ff"></button>
+          <button type="button" class="color-swatch" data-color="#3fb950" style="background:#3fb950"></button>
+          <button type="button" class="color-swatch" data-color="#bc8cff" style="background:#bc8cff"></button>
+          <button type="button" class="color-swatch" data-color="#d29922" style="background:#d29922"></button>
+          <button type="button" class="color-swatch" data-color="#f85149" style="background:#f85149"></button>
+          <button type="button" class="color-swatch" data-color="#2ea043" style="background:#2ea043"></button>
+          <button type="button" class="color-swatch" data-color="#f0883e" style="background:#f0883e"></button>
+          <button type="button" class="color-swatch" data-color="#79c0ff" style="background:#79c0ff"></button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="projectModalCancel">取消</button>
+      <button class="btn btn-primary" id="projectModalSave">💾 保存项目</button>
+    </div>
+  </div>
+</div>
+
 <!-- ======= 文件夹浏览器 模态框 ======= -->
 <div class="modal-overlay" id="browseModal">
-  <div class="modal" style="max-width:560px">
+  <div class="modal" style="max-width:580px">
     <div class="modal-header">
       <span>📂 选择项目文件夹</span>
       <button class="modal-close" id="browseClose">✕</button>
     </div>
+    <div class="browse-toolbar">
+      <input type="text" id="browseManualInput" placeholder="输入或粘贴文件夹完整绝对路径（按回车前往）..." autocomplete="off" />
+      <button class="btn btn-outline btn-sm" id="btnBrowseGo">前往</button>
+    </div>
     <div class="browse-breadcrumb" id="browseBreadcrumb"></div>
-    <div class="modal-body" style="padding:0;min-height:320px;max-height:50vh">
+    <div class="modal-body" style="padding:0;min-height:300px;max-height:48vh">
       <div id="browseList" class="browse-list"></div>
     </div>
     <div class="modal-footer" style="justify-content:space-between">

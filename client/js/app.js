@@ -2,14 +2,17 @@
    Vibe Coding 仪表盘 - 主逻辑 app.js
    ============================================= */
 
-const API = 'http://localhost:3333/api';
+const API = '/api';
 
 // ======= 全局状态 =======
 let allTasks = [];
+let allProjects = [];
+let activeProjectId = '';
 let editingTaskId = null;
 let gitRefreshTimer = null;
 let gitRefreshInterval = 5000;
 let currentConfig = {};
+let selectedProjectColor = '#58a6ff';
 
 // ======= Prompt 模板库 =======
 const PROMPT_TEMPLATES = [
@@ -491,21 +494,22 @@ function initModal() {
 async function refreshGitStatus() {
   try {
     const data = await api('/git/status');
+    const noConfigPanel = document.getElementById('gitNoConfigPanel');
 
     if (data.error) {
-      // 未配置路径时显示引导
-      const panel = document.querySelector('.git-layout');
-      panel.innerHTML = `
-        <div class="git-no-config">
-          <div class="big-icon">🌿</div>
-          <div style="font-size:16px;color:var(--text-secondary);font-weight:600;">尚未配置 Git 项目路径</div>
-          <div>${data.message || '请在设置中填写你的项目路径'}</div>
-          <button class="btn btn-primary" onclick="document.querySelector('[data-tab=settings]').click()">
-            ⚙️ 前往设置
-          </button>
-        </div>`;
+      // 未配置路径时，用覆盖层提示，不破坏 git-layout DOM
+      if (noConfigPanel) {
+        const msgEl = document.getElementById('gitNoConfigMsg');
+        const detailEl = document.getElementById('gitNoConfigDetail');
+        if (msgEl) msgEl.textContent = data.error === 'not_a_git_repo' ? '该路径不是 Git 仓库' : '尚未配置 Git 项目路径';
+        if (detailEl) detailEl.textContent = data.message || '请在设置中填写你的项目路径';
+        noConfigPanel.style.display = 'flex';
+      }
       return;
     }
+
+    // 成功获取数据：隐藏覆盖层，恢复正常显示
+    if (noConfigPanel) noConfigPanel.style.display = 'none';
 
     // 分支
     document.getElementById('gitBranch').textContent = data.branch || '—';
@@ -615,19 +619,25 @@ function renderTimeline(commits) {
 let currentActiveBranch = '';
 let currentViewingBranch = '';
 
-// 切换当前查看的项目目录 (基于配置更新)
+// 切换当前查看的项目目录 (基于配置更新或项目切换)
 async function switchProjectDirectory(newPath) {
   if (!newPath) return;
+  // 检查是否已有项目对应此路径
+  const matched = allProjects.find(p => p.path === newPath);
+  if (matched && matched.id !== activeProjectId) {
+    return switchProject(matched.id);
+  }
   try {
-    showToast(`正在切换项目到: ${newPath}...`, 'info');
+    showToast(`正在切换项目路径到: ${newPath}...`, 'info');
     await api('/config', {
       method: 'PATCH',
       body: JSON.stringify({ project_path: newPath })
     });
     showToast('项目已成功切换！🎉', 'success');
     currentViewingBranch = ''; // 重置为新项目的默认分支
+    await loadProjects();
     await loadTasks();
-    await loadConfig();
+    await loadSettings();
     await refreshGitStatus();
   } catch (e) {
     showToast('切换项目失败: ' + (e.message || e), 'error');
@@ -775,10 +785,16 @@ function renderWorktrees(worktrees) {
 
     // 设为当前项目按钮 / 当前项目徽章
     let projectActionBadge = '';
+    const matchedProject = allProjects.find(p => p.path === wt.path);
     if (isCurActive) {
-      projectActionBadge = '<span class="wt-active-badge">当前项目 ✓</span>';
+      projectActionBadge = '<span class="wt-active-badge">当前活跃 ✓</span>';
+    } else if (matchedProject) {
+      projectActionBadge = `<button class="wt-switch-btn" data-project-id="${matchedProject.id}" title="切换至该项目看板">⚡ 切换为此项目</button>`;
     } else {
-      projectActionBadge = `<button class="wt-switch-btn" data-wt-path="${escHtml(wt.path)}" title="切换整个看板到此工作树项目">🎯 设为当前项目</button>`;
+      projectActionBadge = `
+        <button class="wt-switch-btn" data-wt-path="${escHtml(wt.path)}" title="将项目路径切至此工作树">🎯 切为此路径</button>
+        <button class="wt-add-proj-btn" data-wt-path="${escHtml(wt.path)}" data-wt-name="${escHtml(branchName)}" title="将此工作树保存为独立看板项目">＋ 存为新项目</button>
+      `;
     }
 
     // 最新提交
@@ -833,12 +849,31 @@ function renderWorktrees(worktrees) {
     });
   });
 
-  // 绑定「🎯 设为当前项目」按钮
+  // 绑定「切换项目」按钮
   el.querySelectorAll('.wt-switch-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
+      const pid = btn.dataset.projectId;
+      if (pid) {
+        switchProject(pid);
+      } else {
+        const p = btn.dataset.wtPath;
+        if (p) switchProjectDirectory(p);
+      }
+    });
+  });
+
+  // 绑定「＋ 存为新项目」按钮
+  el.querySelectorAll('.wt-add-proj-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
       const p = btn.dataset.wtPath;
-      if (p) switchProjectDirectory(p);
+      const bName = btn.dataset.wtName || '';
+      openProjectModal(null, p);
+      if (bName && bName !== '未知分支' && !bName.startsWith('HEAD')) {
+        const nameInput = document.getElementById('projectModalName');
+        if (nameInput) nameInput.value = bName;
+      }
     });
   });
 }
@@ -1254,17 +1289,435 @@ function initSettings() {
       document.getElementById('settingMsg').textContent = '✅ 设置已保存！';
       setTimeout(() => { document.getElementById('settingMsg').textContent = ''; }, 2000);
       showToast('设置已保存', 'success');
+
+      // 同步刷新项目列表与 Git 状态
+      await loadProjects();
+      await refreshGitStatus();
     } catch (e) {
       showToast('保存失败', 'error');
     }
   });
 }
 
+// ======= 多项目管理与快速切换 =======
+
+async function loadProjects() {
+  try {
+    const res = await api('/projects');
+    allProjects = res.projects || [];
+    activeProjectId = res.active_project_id || (allProjects[0] ? allProjects[0].id : '');
+
+    const cur = allProjects.find(p => p.id === activeProjectId) || allProjects[0];
+    if (cur) {
+      document.getElementById('projectName').textContent = cur.name || '仪表盘';
+      const dot = document.getElementById('projectBadgeDot');
+      if (dot) {
+        dot.style.background = cur.color || '#58a6ff';
+        dot.style.boxShadow = `0 0 6px ${cur.color || '#58a6ff'}`;
+      }
+    }
+
+    renderProjectSwitcher();
+    renderProjectManageList();
+  } catch (e) {
+    console.error('加载项目列表失败:', e);
+  }
+}
+
+function renderProjectSwitcher(query = '') {
+  const container = document.getElementById('projectDropdownList');
+  const countBadge = document.getElementById('projectCountBadge');
+  if (!container) return;
+
+  if (countBadge) {
+    countBadge.textContent = `${allProjects.length} 个项目`;
+  }
+
+  const q = (query || '').toLowerCase().trim();
+  const filtered = allProjects.filter(p => {
+    if (!q) return true;
+    return (p.name || '').toLowerCase().includes(q) || (p.path || '').toLowerCase().includes(q);
+  });
+
+  if (filtered.length === 0) {
+    container.innerHTML = `<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">无匹配项目</div>`;
+    return;
+  }
+
+  container.innerHTML = filtered.map(p => {
+    const isActive = p.id === activeProjectId;
+    const stats = p.stats || { todo: 0, doing: 0, done: 0 };
+    const taskCountStr = `${stats.todo} 待做 · ${stats.doing} 进行中`;
+    const shortPath = p.path ? p.path.replace(/^\/Users\/[^/]+/, '~') : '未关联路径';
+
+    return `
+      <div class="project-item ${isActive ? 'active' : ''}" data-project-id="${p.id}">
+        <div class="project-item-left">
+          <span class="project-item-dot" style="background:${p.color || '#58a6ff'}"></span>
+          <div class="project-item-info">
+            <div class="project-item-name">
+              <span>${escHtml(p.name)}</span>
+            </div>
+            <div class="project-item-path" title="${escHtml(p.path || '')}">${escHtml(shortPath)}</div>
+          </div>
+        </div>
+        <div class="project-item-right">
+          <span class="project-task-pill">${taskCountStr}</span>
+          ${isActive ? '<span class="project-active-check">✓</span>' : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // 绑定切换事件
+  container.querySelectorAll('.project-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const pid = item.dataset.projectId;
+      closeProjectDropdown();
+      if (pid !== activeProjectId) {
+        switchProject(pid);
+      }
+    });
+  });
+}
+
+function closeProjectDropdown() {
+  const switcher = document.getElementById('projectSwitcher');
+  if (switcher) switcher.classList.remove('open');
+}
+
+function toggleProjectDropdown() {
+  const switcher = document.getElementById('projectSwitcher');
+  if (!switcher) return;
+  const isOpen = switcher.classList.contains('open');
+  if (isOpen) {
+    closeProjectDropdown();
+  } else {
+    switcher.classList.add('open');
+    const searchInput = document.getElementById('projectSearchInput');
+    if (searchInput) {
+      searchInput.value = '';
+      renderProjectSwitcher('');
+      setTimeout(() => searchInput.focus(), 50);
+    }
+  }
+}
+
+function initProjectSwitcher() {
+  const switcherBtn = document.getElementById('projectSwitcherBtn');
+  const searchInput = document.getElementById('projectSearchInput');
+  const btnQuickNew = document.getElementById('btnQuickNewProject');
+  const btnQuickManage = document.getElementById('btnQuickManageProjects');
+
+  if (switcherBtn) {
+    switcherBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleProjectDropdown();
+    });
+  }
+
+  // 搜索框过滤
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      renderProjectSwitcher(e.target.value);
+    });
+    searchInput.addEventListener('click', (e) => e.stopPropagation());
+  }
+
+  // 快捷新建项目
+  if (btnQuickNew) {
+    btnQuickNew.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeProjectDropdown();
+      openProjectModal();
+    });
+  }
+
+  // 快捷前往项目管理
+  if (btnQuickManage) {
+    btnQuickManage.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeProjectDropdown();
+      const settingsTab = document.querySelector('.tab-btn[data-tab="settings"]');
+      if (settingsTab) settingsTab.click();
+      const target = document.getElementById('projectManageList');
+      if (target) {
+        setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+      }
+    });
+  }
+
+  // 点击外部收起
+  document.addEventListener('click', (e) => {
+    const switcher = document.getElementById('projectSwitcher');
+    if (switcher && !switcher.contains(e.target)) {
+      closeProjectDropdown();
+    }
+  });
+
+  // ESC 键收起
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeProjectDropdown();
+    }
+  });
+}
+
+// 切换项目主函数（秒级实时无缝联动）
+async function switchProject(projectId) {
+  if (!projectId) return;
+  const target = allProjects.find(p => p.id === projectId);
+  const targetName = target ? target.name : '新项目';
+
+  try {
+    showToast(`正在切换至项目: ${targetName}...`, 'info');
+    await api('/projects/active', {
+      method: 'POST',
+      body: JSON.stringify({ project_id: projectId })
+    });
+
+    activeProjectId = projectId;
+    currentViewingBranch = ''; // 重置分支查看状态
+
+    // 重新加载所有模块
+    await loadProjects();
+    await loadTasks();
+    await loadSettings();
+    await refreshGitStatus();
+
+    showToast(`已切换至项目：${targetName} 🎉`, 'success');
+  } catch (e) {
+    showToast('切换项目失败: ' + (e.message || e), 'error');
+  }
+}
+
+// 渲染设置页中的项目管理列表
+function renderProjectManageList() {
+  const container = document.getElementById('projectManageList');
+  if (!container) return;
+
+  if (allProjects.length === 0) {
+    container.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:24px;color:var(--text-muted);">暂无项目，点击上方「＋ 新增项目」添加</div>`;
+    return;
+  }
+
+  container.innerHTML = allProjects.map(p => {
+    const isActive = p.id === activeProjectId;
+    const stats = p.stats || { total: 0, todo: 0, doing: 0, done: 0 };
+    const shortPath = p.path ? p.path.replace(/^\/Users\/[^/]+/, '~') : '（未配置路径）';
+
+    return `
+      <div class="project-manage-card ${isActive ? 'active-card' : ''}" data-id="${p.id}">
+        <div class="pm-card-top">
+          <div class="pm-title-group">
+            <span class="pm-color-dot" style="background:${p.color || '#58a6ff'}"></span>
+            <span class="pm-name" title="${escHtml(p.name)}">${escHtml(p.name)}</span>
+          </div>
+          ${isActive ? '<span class="pm-active-tag">● 当前活跃</span>' : ''}
+        </div>
+
+        <div class="pm-path" title="${escHtml(p.path || '')}">
+          📂 ${escHtml(shortPath)}
+        </div>
+
+        <div class="pm-stats-row">
+          <span class="pm-stat-badge">📝 ${stats.todo || 0} 待做</span>
+          <span class="pm-stat-badge">🔄 ${stats.doing || 0} 进行中</span>
+          <span class="pm-stat-badge">✅ ${stats.done || 0} 已完成</span>
+        </div>
+
+        <div class="pm-actions">
+          ${!isActive ? `<button class="btn btn-outline btn-sm btn-pm-switch" data-id="${p.id}">⚡ 切换为此项目</button>` : ''}
+          <button class="btn btn-outline btn-sm btn-pm-edit" data-id="${p.id}">✏️ 编辑</button>
+          <button class="btn btn-danger btn-sm btn-pm-delete" data-id="${p.id}">🗑️ 删除</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // 绑定事件
+  container.querySelectorAll('.btn-pm-switch').forEach(btn => {
+    btn.addEventListener('click', () => switchProject(btn.dataset.id));
+  });
+
+  container.querySelectorAll('.btn-pm-edit').forEach(btn => {
+    btn.addEventListener('click', () => openProjectModal(btn.dataset.id));
+  });
+
+  container.querySelectorAll('.btn-pm-delete').forEach(btn => {
+    btn.addEventListener('click', () => deleteProject(btn.dataset.id));
+  });
+}
+
+// 删除项目
+async function deleteProject(projectId) {
+  const p = allProjects.find(item => item.id === projectId);
+  if (!p) return;
+
+  if (!confirm(`确定要删除项目「${p.name}」吗？\n\n该操作将同时清理该项目的独立需求看板数据文件，请谨慎操作！`)) {
+    return;
+  }
+
+  try {
+    showToast(`正在删除项目: ${p.name}...`, 'info');
+    await api(`/projects/${projectId}`, { method: 'DELETE' });
+    showToast('项目已成功删除', 'success');
+
+    // 重新加载项目和状态
+    await loadProjects();
+    await loadTasks();
+    await loadSettings();
+    await refreshGitStatus();
+  } catch (e) {
+    showToast('删除项目失败: ' + (e.message || e), 'error');
+  }
+}
+
+// 新建 / 编辑项目模态框
+function openProjectModal(projectId = null, defaultPath = '') {
+  const modal = document.getElementById('projectModal');
+  const title = document.getElementById('projectModalTitle');
+  const idInput = document.getElementById('editProjectId');
+  const nameInput = document.getElementById('projectModalName');
+  const pathInput = document.getElementById('projectModalPath');
+
+  if (!modal) return;
+
+  if (projectId) {
+    const p = allProjects.find(item => item.id === projectId);
+    if (!p) return;
+    title.textContent = '✏️ 编辑项目';
+    idInput.value = p.id;
+    nameInput.value = p.name || '';
+    pathInput.value = p.path || '';
+    selectedProjectColor = p.color || '#58a6ff';
+  } else {
+    title.textContent = '＋ 新建项目看板';
+    idInput.value = '';
+    nameInput.value = '';
+    pathInput.value = defaultPath || '';
+    // 如果有 defaultPath，尝试自动预填名称
+    if (defaultPath) {
+      const parts = defaultPath.split('/').filter(Boolean);
+      if (parts.length > 0) nameInput.value = parts[parts.length - 1];
+    }
+    selectedProjectColor = '#58a6ff';
+  }
+
+  // 更新颜色选择器高亮
+  document.querySelectorAll('#projectColorPicker .color-swatch').forEach(swatch => {
+    if (swatch.dataset.color === selectedProjectColor) {
+      swatch.classList.add('active');
+    } else {
+      swatch.classList.remove('active');
+    }
+  });
+
+  modal.classList.add('open');
+  setTimeout(() => nameInput.focus(), 80);
+}
+
+function closeProjectModal() {
+  const modal = document.getElementById('projectModal');
+  if (modal) modal.classList.remove('open');
+}
+
+function initProjectModal() {
+  const modal = document.getElementById('projectModal');
+  const btnClose = document.getElementById('projectModalClose');
+  const btnCancel = document.getElementById('projectModalCancel');
+  const btnSave = document.getElementById('projectModalSave');
+  const btnBrowse = document.getElementById('btnBrowseModalPath');
+  const btnAdd = document.getElementById('btnAddNewProject');
+
+  if (btnAdd) {
+    btnAdd.addEventListener('click', () => openProjectModal());
+  }
+
+  if (btnClose) btnClose.addEventListener('click', closeProjectModal);
+  if (btnCancel) btnCancel.addEventListener('click', closeProjectModal);
+
+  if (modal) {
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeProjectModal();
+    });
+  }
+
+  // 颜色选择
+  document.querySelectorAll('#projectColorPicker .color-swatch').forEach(swatch => {
+    swatch.addEventListener('click', () => {
+      document.querySelectorAll('#projectColorPicker .color-swatch').forEach(s => s.classList.remove('active'));
+      swatch.classList.add('active');
+      selectedProjectColor = swatch.dataset.color;
+    });
+  });
+
+  // 浏览选择路径
+  if (btnBrowse) {
+    btnBrowse.addEventListener('click', () => {
+      const current = document.getElementById('projectModalPath').value.trim();
+      openBrowser(current, 'projectModalPath');
+    });
+  }
+
+  // 保存按钮
+  if (btnSave) {
+    btnSave.addEventListener('click', async () => {
+      const id = document.getElementById('editProjectId').value;
+      const name = document.getElementById('projectModalName').value.trim();
+      const path = document.getElementById('projectModalPath').value.trim();
+
+      if (!name) {
+        showToast('项目名称不能为空', 'error');
+        document.getElementById('projectModalName').focus();
+        return;
+      }
+
+      try {
+        if (id) {
+          // 编辑现有项目
+          await api(`/projects/${id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              name,
+              path,
+              color: selectedProjectColor
+            })
+          });
+          showToast('项目信息已更新', 'success');
+        } else {
+          // 新建项目
+          await api('/projects', {
+            method: 'POST',
+            body: JSON.stringify({
+              name,
+              path,
+              color: selectedProjectColor,
+              set_active: true
+            })
+          });
+          showToast(`已成功创建项目: ${name} 🎉`, 'success');
+        }
+
+        closeProjectModal();
+        await loadProjects();
+        await loadTasks();
+        await loadSettings();
+        await refreshGitStatus();
+      } catch (e) {
+        showToast('保存项目失败: ' + (e.message || e), 'error');
+      }
+    });
+  }
+}
+
 // ======= 文件夹浏览器 =======
 let browsePath = '';  // 当前浏览路径
 let browseIsGit = false;
+let browserTargetInputId = 'settingProjectPath';
 
-function openBrowser(startPath) {
+function openBrowser(startPath, targetInputId = 'settingProjectPath') {
+  browserTargetInputId = targetInputId;
   browsePath = startPath || '';
   document.getElementById('browseModal').classList.add('open');
   loadBrowseDir(browsePath || '');
@@ -1282,26 +1735,24 @@ async function loadBrowseDir(dirPath) {
     const params = dirPath ? `?path=${encodeURIComponent(dirPath)}` : '';
     const data = await api(`/browse${params}`);
 
-    if (data.error) {
-      list.innerHTML = `<div class="browse-empty"><div>❌ ${data.error}</div></div>`;
-      return;
-    }
+    browsePath = data.path || dirPath;
+    browseIsGit = data.is_git || false;
 
-    browsePath = data.path;
-    browseIsGit = data.is_git;
+    const manualInput = document.getElementById('browseManualInput');
+    if (manualInput) manualInput.value = browsePath;
 
     // 更新面包屑
-    renderBreadcrumb(data.path);
+    renderBreadcrumb(browsePath);
 
     // 更新底部信息 & 选择按钮
-    document.getElementById('browseCurrentInfo').textContent = data.path;
+    document.getElementById('browseCurrentInfo').textContent = browsePath;
     const selectBtn = document.getElementById('browseSelect');
-    if (data.is_git) {
-      selectBtn.disabled = false;
-      selectBtn.textContent = '✅ 选择此 Git 仓库';
-    } else {
-      selectBtn.disabled = false;
-      selectBtn.textContent = '✅ 选择此文件夹';
+    selectBtn.disabled = false;
+    selectBtn.textContent = browseIsGit ? '✅ 选择此 Git 仓库' : '✅ 选择此文件夹';
+
+    if (data.error && (!data.items || data.items.length === 0)) {
+      list.innerHTML = `<div class="browse-empty"><div style="color:var(--orange)">⚠️ ${escHtml(data.error)}</div><div style="font-size:12px;color:var(--text-muted);margin-top:6px">您可以在上方地址栏直接输入/粘贴目标路径后点击前往</div></div>`;
+      return;
     }
 
     // 渲染文件夹列表
@@ -1315,12 +1766,9 @@ async function loadBrowseDir(dirPath) {
       </div>`;
     }
 
-    if (data.items.length === 0 && !data.parent) {
-      html = '<div class="browse-empty"><div style="font-size:24px">📭</div><div>该目录下没有子文件夹</div></div>';
-    } else if (data.items.length === 0) {
-      html += '<div class="browse-empty"><div>没有子文件夹</div></div>';
+    if (!data.items || data.items.length === 0) {
+      html += '<div class="browse-empty"><div style="font-size:24px">📭</div><div>该目录下没有子文件夹</div></div>';
     } else {
-      // 过滤掉 .git 目录本身（不应该进入）
       for (const item of data.items) {
         if (item.name === '.git') continue;
         const gitCls = item.is_git ? ' is-git-repo' : '';
@@ -1330,6 +1778,7 @@ async function loadBrowseDir(dirPath) {
           <span class="folder-icon">${icon}</span>
           <span class="folder-name">${escHtml(item.name)}</span>
           ${gitBadge}
+          <button type="button" class="browse-item-select-btn" data-path="${escHtml(item.path)}" title="直接选择此文件夹">选择此项</button>
         </div>`;
       }
     }
@@ -1338,14 +1787,43 @@ async function loadBrowseDir(dirPath) {
 
     // 绑定点击事件（进入子目录）
     list.querySelectorAll('.browse-item').forEach(el => {
-      el.addEventListener('click', () => {
+      el.addEventListener('click', (e) => {
+        if (e.target.closest('.browse-item-select-btn')) return;
         loadBrowseDir(el.dataset.path);
+      });
+    });
+
+    // 绑定行内快捷「选择此项」按钮
+    list.querySelectorAll('.browse-item-select-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const selected = btn.dataset.path;
+        applySelectedPath(selected);
       });
     });
 
   } catch (e) {
     list.innerHTML = `<div class="browse-empty"><div>❌ 加载失败</div><div style="font-size:12px">${e.message}</div></div>`;
   }
+}
+
+function applySelectedPath(targetPath) {
+  if (!targetPath) return;
+  const targetInput = document.getElementById(browserTargetInputId);
+  if (targetInput) {
+    targetInput.value = targetPath;
+    if (browserTargetInputId === 'projectModalPath') {
+      const nameInput = document.getElementById('projectModalName');
+      if (nameInput && !nameInput.value.trim()) {
+        const parts = targetPath.split('/').filter(Boolean);
+        if (parts.length > 0) {
+          nameInput.value = parts[parts.length - 1];
+        }
+      }
+    }
+  }
+  closeBrowser();
+  showToast(`已选择路径：${targetPath}`, 'success');
 }
 
 function renderBreadcrumb(fullPath) {
@@ -1379,10 +1857,10 @@ function renderBreadcrumb(fullPath) {
 }
 
 function initBrowser() {
-  // 打开浏览器
+  // 打开浏览器 (设置页触发)
   document.getElementById('btnBrowseFolder').addEventListener('click', () => {
     const current = document.getElementById('settingProjectPath').value.trim();
-    openBrowser(current);
+    openBrowser(current, 'settingProjectPath');
   });
 
   // 关闭
@@ -1392,11 +1870,25 @@ function initBrowser() {
     if (e.target === document.getElementById('browseModal')) closeBrowser();
   });
 
+  // 手动输入路径直达
+  const manualInput = document.getElementById('browseManualInput');
+  const btnGo = document.getElementById('btnBrowseGo');
+  if (btnGo && manualInput) {
+    btnGo.addEventListener('click', () => {
+      const val = manualInput.value.trim();
+      if (val) loadBrowseDir(val);
+    });
+    manualInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const val = manualInput.value.trim();
+        if (val) loadBrowseDir(val);
+      }
+    });
+  }
+
   // 选择按钮
   document.getElementById('browseSelect').addEventListener('click', () => {
-    document.getElementById('settingProjectPath').value = browsePath;
-    closeBrowser();
-    showToast(`已选择路径：${browsePath}`, 'success');
+    applySelectedPath(browsePath);
   });
 }
 
@@ -1408,7 +1900,10 @@ async function init() {
   initEditor();
   initSettings();
   initBrowser();
+  initProjectSwitcher();
+  initProjectModal();
 
+  await loadProjects();
   await loadTasks();
   await loadSettings();
 }
