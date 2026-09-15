@@ -1,0 +1,79 @@
+{
+  "created_at": "2026-09-15T10:10:07.050Z",
+  "reason": "startup",
+  "active_project_id": "proj_1789292774357_lusk",
+  "projects": [
+    {
+      "id": "proj_default",
+      "name": "NewEP",
+      "path": "/Users/apple/Documents/ap/EasyInput/NewEP",
+      "color": "#58a6ff",
+      "icon": "⚡",
+      "created_at": "2026-09-13T09:35:59.283Z"
+    },
+    {
+      "id": "proj_1789292774357_lusk",
+      "name": "ToDoList",
+      "path": "/Users/apple/Documents/AIcoding/Anti项目/ToDoList",
+      "color": "#d29922",
+      "icon": "📁",
+      "created_at": "2026-09-13T09:46:14.357Z"
+    }
+  ],
+  "boards": {
+    "proj_default": {
+      "tasks": [
+        {
+          "id": "task_demo_001",
+          "title": "示例：实现用户登录功能",
+          "status": "done",
+          "priority": "high",
+          "prompt": "## 背景与目标\n实现基础的用户名/密码登录功能，支持 JWT token。\n\n## 具体要求\n- [ ] 登录页面 UI\n- [ ] 后端 /api/login 接口\n- [ ] JWT 生成与验证\n\n## 技术约束\n- 技术栈：Node.js + Express\n- 使用 bcrypt 加密密码\n\n## 验收标准\n- [ ] 正确密码可以登录\n- [ ] 错误密码返回 401",
+          "created_at": "2026-09-13T08:00:00.000Z",
+          "started_at": "2026-09-13T08:30:00.000Z",
+          "done_at": "2026-09-13T09:15:00.000Z",
+          "linked_commits": [],
+          "tags": [
+            "auth",
+            "backend"
+          ],
+          "milestone_id": ""
+        },
+        {
+          "id": "task_demo_002",
+          "title": "示例：搭建项目基础架构",
+          "status": "doing",
+          "priority": "high",
+          "prompt": "## 背景与目标\n搭建 Vibe Coding 仪表盘的前后端基础架构。\n\n## 具体要求\n- [ ] Express 服务器搭建\n- [ ] 静态文件托管\n- [ ] API 路由规划\n\n## 技术约束\n- 纯 Node.js，不使用框架\n\n## 验收标准\n- [ ] localhost:3333 可以访问\n- [ ] API 接口正常响应",
+          "created_at": "2026-09-13T09:00:00.000Z",
+          "started_at": "2026-09-13T09:30:00.000Z",
+          "done_at": null,
+          "linked_commits": [],
+          "tags": [
+            "infra"
+          ],
+          "milestone_id": ""
+        },
+        {
+          "id": "task_demo_003",
+          "title": "示例：实现 Prompt 模板库",
+          "status": "doing",
+          "priority": "medium",
+          "prompt": "## 背景与目标\n内置常用 Prompt 模板，让用户快速开始写需求文档。\n\n## 具体要求\n- [ ] 「实现新功能」模板\n- [ ] 「修复 Bug」模板\n- [ ] 「代码重构」模板\n- [ ] 「写单元测试」模板\n\n## 技术约束\n- 模板以 Markdown 格式存储\n- 支持一键插入到编辑器\n\n## 验收标准\n- [ ] 点击模板可以填充编辑器\n- [ ] 可以自定义保存模板",
+          "created_at": "2026-09-13T10:00:00.000Z",
+          "started_at": "2026-09-13T08:29:29.546Z",
+          "done_at": null,
+          "linked_commits": [],
+          "tags": [
+            "feature",
+            "ux"
+          ],
+          "milestone_id": ""
+        }
+      ]
+    },
+    "proj_1789292774357_lusk": {
+      "tasks": []
+    }
+  }
+}

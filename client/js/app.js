@@ -477,6 +477,8 @@ async function deleteTask(id) {
     showToast(`已将需求「${task.title}」移入垃圾箱 🗑`, 'info', '↩ 撤回', async () => {
       await restoreTask(id);
     });
+    // 移入垃圾箱同样会写入备份档案，设置页可见时同步刷新概览
+    refreshBackupSummaryIfVisible();
   } catch (e) {
     showToast('移入垃圾箱失败', 'error');
   }
@@ -581,6 +583,7 @@ async function saveTask() {
     closeModal();
     renderKanban();
     updateBadges();
+    refreshBackupSummaryIfVisible();
   } catch (e) {
     showToast('保存失败', 'error');
   }
@@ -1368,6 +1371,8 @@ async function loadSettings() {
 
     // 加载统计
     loadStats();
+    // 加载备份概览
+    loadBackupSummary();
   } catch (e) {}
 }
 
@@ -2271,6 +2276,208 @@ function initTrashModal() {
   if (btnEmpty) btnEmpty.addEventListener('click', emptyTrash);
 }
 
+// ======= 需求本地备份 =======
+let backupItems = [];
+
+async function loadBackupSummary() {
+  try {
+    const s = await api('/backups');
+    document.getElementById('bkTotal').textContent = s.total_archived;
+    document.getElementById('bkAlive').textContent = s.alive_count;
+
+    const delEl = document.getElementById('bkDeleted');
+    delEl.textContent = s.deleted_count;
+    delEl.classList.toggle('has-value', s.deleted_count > 0);
+
+    document.getElementById('bkSnapshots').textContent = s.snapshots.count;
+    const dirEl = document.getElementById('bkDir');
+    dirEl.textContent = s.backup_dir;
+    dirEl.title = s.backup_dir;
+    document.getElementById('bkUpdatedAt').textContent =
+      `最近备份：${s.updated_at ? formatTime(s.updated_at) : '—'}` +
+      (s.journal.latest ? `　·　事件日志 ${s.journal.latest}` : '');
+  } catch (e) {
+    document.getElementById('bkUpdatedAt').textContent = '备份状态读取失败，请确认服务已启动';
+  }
+}
+
+function openBackupModal() {
+  document.getElementById('backupModal').classList.add('open');
+  document.getElementById('backupSearch').value = '';
+  document.getElementById('backupOnlyDeleted').checked = false;
+  loadBackupList();
+}
+
+function closeBackupModal() {
+  document.getElementById('backupModal').classList.remove('open');
+}
+
+// 需求变更后，只有在设置页可见时才刷新备份概览，避免无谓的请求
+function refreshBackupSummaryIfVisible() {
+  const panel = document.getElementById('tab-settings');
+  if (panel && panel.classList.contains('active')) loadBackupSummary();
+}
+
+async function loadBackupList() {
+  const listEl = document.getElementById('backupList');
+  const q = document.getElementById('backupSearch').value.trim();
+  const onlyDeleted = document.getElementById('backupOnlyDeleted').checked;
+  listEl.innerHTML = '<div class="backup-empty">加载中…</div>';
+  try {
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (onlyDeleted) params.set('deleted', '1');
+    const qs = params.toString();
+    const res = await api(`/backups/archive${qs ? '?' + qs : ''}`);
+    backupItems = res.items || [];
+    renderBackupList(backupItems);
+  } catch (e) {
+    listEl.innerHTML = '<div class="backup-empty">读取备份档案失败</div>';
+    document.getElementById('backupListInfo').textContent = '';
+  }
+}
+
+function renderBackupList(items) {
+  const listEl = document.getElementById('backupList');
+  document.getElementById('backupListInfo').textContent = `共 ${items.length} 条备份记录`;
+
+  if (!items.length) {
+    listEl.innerHTML = `<div class="backup-empty">
+      <div style="font-size:28px">🗂️</div>
+      <div>没有匹配的备份记录</div>
+    </div>`;
+    return;
+  }
+
+  listEl.innerHTML = items.map(it => {
+    const statusLabel = { todo: '📝 待做', doing: '🔄 进行中', done: '✅ 已完成' }[it.status] || it.status;
+    const tags = (it.tags || []).slice(0, 4)
+      .map(t => `<span class="backup-badge">${escHtml(t)}</span>`).join('');
+    const prompt = it.prompt ? escHtml(it.prompt.replace(/\s+/g, ' ').slice(0, 140)) : '';
+
+    return `<div class="backup-item ${it.deleted_at ? 'is-deleted' : ''}">
+      <div class="backup-item-main">
+        <div class="backup-item-title">${escHtml(it.title)}</div>
+        <div class="backup-item-meta">
+          ${it.deleted_at ? '<span class="backup-badge badge-deleted">已删除</span>' : ''}
+          <span class="backup-badge">${statusLabel}</span>
+          ${it.project_name ? `<span class="backup-badge badge-project">${escHtml(it.project_name)}</span>` : ''}
+          ${tags}
+          <span>备份于 ${formatTime(it.last_backed_up_at)}</span>
+          <span>· ${it.version_count} 个版本</span>
+        </div>
+        ${prompt ? `<div class="backup-item-prompt">${prompt}</div>` : ''}
+      </div>
+      <div class="backup-item-actions">
+        <button class="btn btn-outline btn-sm btn-restore" data-id="${it.id}">♻️ 恢复</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  listEl.querySelectorAll('.btn-restore').forEach(btn => {
+    btn.addEventListener('click', () => restoreBackupTask(btn.dataset.id));
+  });
+}
+
+async function restoreBackupTask(taskId) {
+  const item = backupItems.find(i => i.id === taskId);
+  const label = item ? item.title : taskId;
+  const target = (item && item.project_name) ? `「${item.project_name}」` : '当前项目';
+  if (!confirm(`确定把「${label}」恢复到 ${target} 的看板吗？`)) return;
+
+  try {
+    const r = await api('/backups/restore', { method: 'POST', body: JSON.stringify({ task_id: taskId }) });
+    let msg;
+    if (r.fell_back) msg = `原项目已不存在，已恢复到「${r.project_name}」✅`;
+    else if (r.revived_from_trash) msg = `已从垃圾箱救回到「${r.project_name}」✅`;
+    else msg = `需求已恢复到「${r.project_name}」✅`;
+    showToast(msg, 'success');
+    await loadTasks();
+    await loadStats();
+    await loadBackupList();
+    await loadBackupSummary();
+  } catch (e) {
+    showToast('恢复失败：该需求可能已经存在于看板中', 'error');
+  }
+}
+
+async function createBackupSnapshot() {
+  const btn = document.getElementById('btnBackupSnapshot');
+  const raw = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ 备份中…';
+  try {
+    const r = await api('/backups/snapshot', { method: 'POST' });
+    showToast(`全量备份完成，共 ${r.task_count} 条需求 ✅`, 'success');
+    await loadBackupSummary();
+  } catch (e) {
+    showToast('备份失败', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = raw;
+  }
+}
+
+function copyBackupDir() {
+  const dir = document.getElementById('bkDir').textContent;
+  if (!dir || dir === '—') { showToast('备份目录尚未就绪', 'error'); return; }
+  navigator.clipboard.writeText(dir).then(
+    () => showToast('备份目录已复制 📋', 'success'),
+    () => showToast('复制失败，请手动选择', 'error')
+  );
+}
+
+// 灾备：档案被误删/写坏时，从只追加的事件日志重放重建
+async function rebuildBackupArchive() {
+  let preview;
+  try {
+    preview = await api('/backups/rebuild');
+  } catch (e) {
+    showToast('无法读取事件日志', 'error');
+    return;
+  }
+
+  if (!preview.events_applied) {
+    showToast('事件日志里没有可重放的记录，未做任何改动', 'error');
+    return;
+  }
+
+  const msg =
+    `将从 ${preview.journal_files} 个事件日志文件中重放 ${preview.events_applied} 条事件，\n` +
+    `重建出 ${preview.would_rebuild_tasks} 条需求（其中 ${preview.would_rebuild_deleted} 条为已删除）。\n\n` +
+    `当前档案会先另存一份再覆盖。确定继续吗？`;
+  if (!confirm(msg)) return;
+
+  try {
+    const r = await api('/backups/rebuild', { method: 'POST' });
+    showToast(`已从日志重建 ${r.rebuilt_tasks} 条需求（重放 ${r.events_applied} 条事件）✅`, 'success');
+    await loadBackupSummary();
+  } catch (e) {
+    showToast('重建失败', 'error');
+  }
+}
+
+function initBackupUI() {
+  document.getElementById('btnBackupSnapshot')?.addEventListener('click', createBackupSnapshot);
+  // 「导出备份」是 <a href> 直链，交给浏览器按服务端 Content-Disposition 下载，无需 JS
+  document.getElementById('btnBackupBrowse')?.addEventListener('click', openBackupModal);
+  document.getElementById('btnCopyBackupDir')?.addEventListener('click', copyBackupDir);
+  document.getElementById('btnBackupRebuild')?.addEventListener('click', rebuildBackupArchive);
+
+  document.getElementById('backupModalClose')?.addEventListener('click', closeBackupModal);
+  document.getElementById('backupModalCancel')?.addEventListener('click', closeBackupModal);
+  document.getElementById('backupModal')?.addEventListener('click', (e) => {
+    if (e.target === document.getElementById('backupModal')) closeBackupModal();
+  });
+
+  let searchTimer = null;
+  document.getElementById('backupSearch')?.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(loadBackupList, 250);
+  });
+  document.getElementById('backupOnlyDeleted')?.addEventListener('change', loadBackupList);
+}
+
 // ======= 初始化 =======
 async function init() {
   initTabs();
@@ -2283,6 +2490,7 @@ async function init() {
   initProjectModal();
   initKanbanViewControls();
   initTrashModal();
+  initBackupUI();
 
   await loadProjects();
   await loadTasks();

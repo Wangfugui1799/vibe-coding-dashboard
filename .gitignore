@@ -6,6 +6,10 @@ yarn.lock
 # 运行时配置（含本机绝对路径，不入库）
 server/data/config.json
 
+# 备份的临时写入文件（原子写的中间态，正常不会残留）
+server/data/backups/**/*.tmp
+server/data/backups/*.tmp
+
 # 日志与临时文件
 *.log
 npm-debug.log*

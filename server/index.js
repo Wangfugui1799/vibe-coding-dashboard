@@ -18,6 +18,15 @@ const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 const BOARDS_DIR  = path.join(DATA_DIR, 'boards');
 const PROJECTS_FILE = path.join(DATA_DIR, 'projects.json');
 
+// ======= 本地备份目录 =======
+// 需求（任务）在任何一次创建 / 修改 / 删除时都会落盘备份，误删可恢复
+const BACKUP_DIR    = path.join(DATA_DIR, 'backups');
+const JOURNAL_DIR   = path.join(BACKUP_DIR, 'journal');    // 追加型事件日志（按天分文件）
+const SNAPSHOT_DIR  = path.join(BACKUP_DIR, 'snapshots');  // 全量快照（可整体回滚）
+const ARCHIVE_FILE  = path.join(BACKUP_DIR, 'task-archive.json'); // 全量档案（按 id 去重，永不删除）
+const MAX_VERSIONS_PER_TASK = 20;  // 单条需求保留的历史版本上限
+const MAX_SNAPSHOTS         = 60;  // 保留的全量快照数量上限
+
 // ======= 工具函数 =======
 function readJSON(file, fallback = {}) {
   try { return JSON.parse(fs.readFileSync(file, 'utf-8')); }
@@ -507,6 +516,406 @@ function gitBranchCommits(projectPath, branch) {
   return { branch: branch || 'HEAD', commits };
 }
 
+// ======= 本地备份模块 =======
+// 三层防护，确保任何一条需求都不会真正丢失：
+//  1) task-archive.json —— 全量档案：按 task id 去重，永远保留每条需求的最新内容 + 历史版本，
+//     需求被删除后仅标记 deleted_at，数据本体不删除，可一键恢复；
+//  2) journal/YYYY-MM-DD.jsonl —— 追加型事件日志：逐条记录每次 created / updated / deleted，
+//     只追加不覆盖，即使档案文件损坏也能从日志里重建；
+//  3) snapshots/*.json —— 所有看板的完整快照，用于整体回滚（启动时自动、也支持手动触发）。
+function ensureBackupDirs() {
+  ensureDir(BACKUP_DIR);
+  ensureDir(JOURNAL_DIR);
+  ensureDir(SNAPSHOT_DIR);
+}
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+
+function dateStamp(d = new Date()) {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function timeStamp(d = new Date()) {
+  return `${dateStamp(d)}_${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`;
+}
+
+// 快照文件名专用：带毫秒。只精确到秒的话，同一秒内连续备份会互相覆盖。
+function timeStampMs(d = new Date()) {
+  return `${timeStamp(d)}${String(d.getMilliseconds()).padStart(3, '0')}`;
+}
+
+function readArchive() {
+  ensureBackupDirs();
+  const data = readJSON(ARCHIVE_FILE, null);
+  if (!data || !Array.isArray(data.tasks)) {
+    return { version: 1, created_at: new Date().toISOString(), updated_at: null, tasks: [] };
+  }
+  return data;
+}
+
+function writeArchive(archive) {
+  ensureBackupDirs();
+  archive.updated_at = new Date().toISOString();
+  // 原子写：先落临时文件再 rename，避免写到一半进程挂掉导致备份档案损坏
+  const tmp = ARCHIVE_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(archive, null, 2), 'utf-8');
+  fs.renameSync(tmp, ARCHIVE_FILE);
+}
+
+function appendJournal(event) {
+  try {
+    ensureBackupDirs();
+    const file = path.join(JOURNAL_DIR, `${dateStamp()}.jsonl`);
+    fs.appendFileSync(file, JSON.stringify(event) + '\n', 'utf-8');
+  } catch (e) {
+    console.error('[backup] 写入事件日志失败:', e.message);
+  }
+}
+
+/**
+ * 把一条需求写入备份档案。
+ * @param {object} task    需求对象（完整内容）
+ * @param {object} project 所属项目（可为 null）
+ * @param {string} action  created | updated | deleted | restored | backfill
+ */
+function archiveTask(task, project, action) {
+  if (!task || !task.id) return false;
+  try {
+    const now = new Date().toISOString();
+    const archive = readArchive();
+    let rec = archive.tasks.find(t => t.id === task.id);
+
+    if (!rec) {
+      rec = {
+        id: task.id,
+        project_id: project ? project.id : '',
+        project_name: project ? project.name : '',
+        first_created_at: task.created_at || now,
+        first_backed_up_at: now,
+        last_backed_up_at: now,
+        last_action: action,
+        deleted_at: null,
+        version_count: 0,
+        task: null,
+        versions: []
+      };
+      archive.tasks.push(rec);
+    }
+
+    // 仅在内容真正变化时追加历史版本，避免拖拽卡片换列这类操作把版本表撑爆
+    const lastSnap = rec.versions.length ? rec.versions[rec.versions.length - 1].snapshot : null;
+    if (!lastSnap || JSON.stringify(lastSnap) !== JSON.stringify(task)) {
+      rec.versions.push({ at: now, action, snapshot: task });
+      if (rec.versions.length > MAX_VERSIONS_PER_TASK) {
+        rec.versions = rec.versions.slice(-MAX_VERSIONS_PER_TASK);
+      }
+    }
+    rec.version_count = rec.versions.length;
+
+    rec.task = task;
+    rec.last_backed_up_at = now;
+    rec.last_action = action;
+    if (project) { rec.project_id = project.id; rec.project_name = project.name; }
+    // 只有「删除」才打上删除标记；恢复 / 修改会自动清除，档案里始终留着数据本体
+    rec.deleted_at = action === 'deleted' ? now : null;
+
+    writeArchive(archive);
+    appendJournal({ at: now, action, project_id: rec.project_id, project_name: rec.project_name, task });
+    return true;
+  } catch (e) {
+    console.error('[backup] 备份需求失败:', task.id, e.message);
+    return false;
+  }
+}
+
+function findProjectById(projectId) {
+  try {
+    const pData = getProjectsData();
+    return pData.projects.find(p => p.id === projectId) || null;
+  } catch (e) { return null; }
+}
+
+function createSnapshot(reason = 'manual') {
+  ensureBackupDirs();
+  const pData = getProjectsData();
+  const boards = {};
+  let taskCount = 0;
+  pData.projects.forEach(p => {
+    const board = readBoard(p.id);
+    boards[p.id] = board;
+    taskCount += Array.isArray(board.tasks) ? board.tasks.length : 0;
+  });
+
+  const snap = {
+    created_at: new Date().toISOString(),
+    reason,
+    active_project_id: pData.active_project_id,
+    projects: pData.projects,
+    boards
+  };
+  // 文件名带毫秒，并在极端情况下（同毫秒）追加序号兜底，确保每份快照都独立留存
+  const base = timeStampMs();
+  let name = `${base}_${reason}.json`;
+  let file = path.join(SNAPSHOT_DIR, name);
+  let seq = 1;
+  while (fs.existsSync(file)) {
+    name = `${base}_${reason}_${seq++}.json`;
+    file = path.join(SNAPSHOT_DIR, name);
+  }
+  const tmp = file + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(snap, null, 2), 'utf-8');
+  fs.renameSync(tmp, file);
+
+  appendJournal({ at: snap.created_at, action: 'snapshot', reason, file: name });
+  pruneSnapshots();
+
+  return { name, file, created_at: snap.created_at, reason, project_count: pData.projects.length, task_count: taskCount };
+}
+
+function pruneSnapshots() {
+  try {
+    const files = fs.readdirSync(SNAPSHOT_DIR).filter(f => f.endsWith('.json')).sort();
+    if (files.length <= MAX_SNAPSHOTS) return;
+    files.slice(0, files.length - MAX_SNAPSHOTS).forEach(f => {
+      try { fs.unlinkSync(path.join(SNAPSHOT_DIR, f)); } catch (e) {}
+    });
+  } catch (e) {}
+}
+
+function readJournal(date) {
+  ensureBackupDirs();
+  const target = (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) ? date : dateStamp();
+  const file = path.join(JOURNAL_DIR, `${target}.jsonl`);
+  if (!fs.existsSync(file)) return { date: target, events: [] };
+  const events = fs.readFileSync(file, 'utf-8')
+    .split('\n')
+    .filter(Boolean)
+    .map(line => { try { return JSON.parse(line); } catch (e) { return null; } })
+    .filter(Boolean);
+  return { date: target, events };
+}
+
+function getBackupSummary() {
+  ensureBackupDirs();
+  const archive = readArchive();
+  const tasks = archive.tasks || [];
+
+  let journalFiles = [];
+  try { journalFiles = fs.readdirSync(JOURNAL_DIR).filter(f => f.endsWith('.jsonl')).sort().reverse(); } catch (e) {}
+  const journalBytes = journalFiles.reduce((n, f) => {
+    try { return n + fs.statSync(path.join(JOURNAL_DIR, f)).size; } catch (e) { return n; }
+  }, 0);
+
+  let snapshotFiles = [];
+  try { snapshotFiles = fs.readdirSync(SNAPSHOT_DIR).filter(f => f.endsWith('.json')).sort().reverse(); } catch (e) {}
+
+  let archiveBytes = 0;
+  try { archiveBytes = fs.statSync(ARCHIVE_FILE).size; } catch (e) {}
+
+  let latestSnapshotTime = null;
+  if (snapshotFiles.length) {
+    try {
+      latestSnapshotTime = JSON.parse(fs.readFileSync(path.join(SNAPSHOT_DIR, snapshotFiles[0]), 'utf-8')).created_at || null;
+    } catch (e) {}
+  }
+
+  return {
+    enabled: true,
+    backup_dir: BACKUP_DIR,
+    archive_file: ARCHIVE_FILE,
+    total_archived: tasks.length,
+    alive_count: tasks.filter(t => !t.deleted_at).length,
+    deleted_count: tasks.filter(t => !!t.deleted_at).length,
+    archive_bytes: archiveBytes,
+    updated_at: archive.updated_at || null,
+    journal: { count: journalFiles.length, bytes: journalBytes, latest: journalFiles[0] || null },
+    snapshots: { count: snapshotFiles.length, latest: snapshotFiles[0] || null, latest_time: latestSnapshotTime }
+  };
+}
+
+function restoreTaskFromArchive(taskId, projectId) {
+  const archive = readArchive();
+  const rec = archive.tasks.find(t => t.id === taskId);
+  if (!rec || !rec.task) return { error: 'archive_not_found', message: '备份档案中未找到该需求' };
+
+  const pData = getProjectsData();
+
+  // 依次尝试：显式指定的项目 → 需求原来的项目 → 当前激活项目 → 列表第一个项目。
+  // 原来的项目可能已经被删除，若不做兜底，这类需求将永远无法恢复。
+  const candidates = [projectId, rec.project_id, pData.active_project_id, pData.projects[0] && pData.projects[0].id];
+  let targetId = null;
+  for (const c of candidates) {
+    if (c && pData.projects.some(p => p.id === c)) { targetId = c; break; }
+  }
+  if (!targetId) return { error: 'project_not_found', message: '当前没有任何可用项目，无法恢复' };
+
+  const proj = pData.projects.find(p => p.id === targetId);
+  const fellBack = !!(rec.project_id && rec.project_id !== targetId);
+
+  const board = readBoard(targetId);
+  if (!Array.isArray(board.tasks)) board.tasks = [];
+
+  const exist = board.tasks.find(t => t.id === taskId);
+  if (exist) {
+    // 已存在、但躺在垃圾箱里 → 直接把它从垃圾箱救回，而不是报「已存在」让用户困惑
+    if (exist.deleted_at) {
+      exist.deleted_at = null;
+      if (exist.status_before_delete) {
+        exist.status = exist.status_before_delete;
+        delete exist.status_before_delete;
+      }
+      writeBoard(targetId, board);
+      archiveTask(exist, proj, 'restored');
+      return {
+        task: exist, project_id: targetId, project_name: proj.name,
+        fell_back: fellBack, original_project_name: rec.project_name || '',
+        revived_from_trash: true
+      };
+    }
+    return { error: 'already_exists', message: '该需求已存在于目标看板中', task: exist };
+  }
+
+  // 从档案救回。必须清掉删除相关标记：档案里存的是移入垃圾箱那一刻的快照，
+  // 带着 deleted_at，若原样写回看板会被过滤逻辑挡掉、直接落进垃圾箱。
+  const restored = { ...rec.task };
+  delete restored.deleted_at;
+  delete restored.status_before_delete;
+  board.tasks.unshift(restored);
+  writeBoard(targetId, board);
+  archiveTask(restored, proj, 'restored');
+
+  return {
+    task: restored,
+    project_id: targetId,
+    project_name: proj.name,
+    // 原项目已不存在、被兜底到别的项目时告知前端，方便提示用户
+    fell_back: fellBack,
+    original_project_name: rec.project_name || ''
+  };
+}
+
+function maybeStartupSnapshot() {
+  try {
+    ensureBackupDirs();
+    const today = dateStamp();
+    const exists = fs.readdirSync(SNAPSHOT_DIR).some(f => f.startsWith(today));
+    if (!exists) createSnapshot('startup');
+  } catch (e) {
+    console.error('[backup] 启动快照失败:', e.message);
+  }
+}
+
+/**
+ * 从事件日志重放，重建全量档案。
+ * 用途：task-archive.json 被误删 / 写坏（手工编辑出错、磁盘异常等）时的灾备恢复。
+ * 日志是只追加的，完整记录了每次变更的整条需求快照，因此可以据此还原。
+ * 注意：日志按天分文件、文件名即日期，按文件名升序重放即可保证时序正确。
+ */
+function rebuildArchiveFromJournal() {
+  ensureBackupDirs();
+  const files = fs.readdirSync(JOURNAL_DIR).filter(f => f.endsWith('.jsonl')).sort();
+
+  const rebuilt = { version: 1, created_at: new Date().toISOString(), updated_at: null, rebuilt_from: 'journal', tasks: [] };
+  let applied = 0;
+
+  files.forEach(f => {
+    let lines = [];
+    try { lines = fs.readFileSync(path.join(JOURNAL_DIR, f), 'utf-8').split('\n').filter(Boolean); }
+    catch (e) { return; }
+
+    lines.forEach(line => {
+      let ev; try { ev = JSON.parse(line); } catch (e) { return; }
+      // snapshot 之类不含任务本体的事件跳过
+      if (!ev || !ev.task || !ev.task.id) return;
+
+      const action = ev.action || 'updated';
+      let rec = rebuilt.tasks.find(t => t.id === ev.task.id);
+      if (!rec) {
+        rec = {
+          id: ev.task.id,
+          project_id: ev.project_id || '',
+          project_name: ev.project_name || '',
+          first_created_at: ev.task.created_at || ev.at,
+          first_backed_up_at: ev.at,
+          last_backed_up_at: ev.at,
+          last_action: action,
+          deleted_at: null,
+          version_count: 0,
+          task: null,
+          versions: []
+        };
+        rebuilt.tasks.push(rec);
+      }
+
+      const lastSnap = rec.versions.length ? rec.versions[rec.versions.length - 1].snapshot : null;
+      if (!lastSnap || JSON.stringify(lastSnap) !== JSON.stringify(ev.task)) {
+        rec.versions.push({ at: ev.at, action, snapshot: ev.task });
+        if (rec.versions.length > MAX_VERSIONS_PER_TASK) rec.versions = rec.versions.slice(-MAX_VERSIONS_PER_TASK);
+      }
+      rec.version_count = rec.versions.length;
+      rec.task = ev.task;
+      rec.last_backed_up_at = ev.at;
+      rec.last_action = action;
+      if (ev.project_id)   rec.project_id = ev.project_id;
+      if (ev.project_name) rec.project_name = ev.project_name;
+      rec.deleted_at = action === 'deleted' ? ev.at : null;
+      applied++;
+    });
+  });
+
+  return { rebuilt, applied, files: files.length };
+}
+
+function applyRebuildFromJournal() {
+  const { rebuilt, applied, files } = rebuildArchiveFromJournal();
+  if (applied === 0) {
+    return { error: 'journal_empty', message: '事件日志中没有可用记录，未做任何改动' };
+  }
+
+  // 先备份当前档案（可能已损坏），再覆盖，避免把仅存的线索也弄丢
+  let savedAs = null;
+  try {
+    if (fs.existsSync(ARCHIVE_FILE) && fs.statSync(ARCHIVE_FILE).size > 0) {
+      savedAs = path.join(BACKUP_DIR, `task-archive.before-rebuild-${timeStamp()}.json`);
+      fs.copyFileSync(ARCHIVE_FILE, savedAs);
+    }
+  } catch (e) {
+    console.error('[backup] 重建前备份旧档案失败:', e.message);
+  }
+
+  writeArchive(rebuilt);
+  appendJournal({ at: new Date().toISOString(), action: 'rebuild', files, restored_tasks: rebuilt.tasks.length });
+
+  return {
+    success: true,
+    rebuilt_tasks: rebuilt.tasks.length,
+    events_applied: applied,
+    journal_files: files,
+    previous_archive_saved_as: savedAs ? path.basename(savedAs) : null
+  };
+}
+
+
+function initBackup() {
+  ensureBackupDirs();
+  // 首次启用备份时，把看板里已有的需求全量回填进档案，避免「启用前」的需求没有备份
+  try {
+    const archive = readArchive();
+    if (!archive.tasks.length) {
+      const pData = getProjectsData();
+      let n = 0;
+      pData.projects.forEach(p => {
+        const board = readBoard(p.id);
+        (Array.isArray(board.tasks) ? board.tasks : []).forEach(t => { if (archiveTask(t, p, 'backfill')) n++; });
+      });
+      if (n > 0) console.log(`[backup] 已把 ${n} 条已有需求回填进备份档案`);
+    }
+  } catch (e) {
+    console.error('[backup] 回填档案失败:', e.message);
+  }
+  maybeStartupSnapshot();
+}
+
 // ======= 路由处理 =======
 async function handleRequest(req, res) {
   const url   = new URL(req.url, `http://localhost:${PORT}`);
@@ -663,6 +1072,12 @@ async function handleRequest(req, res) {
 
       saveProjectsData(pData);
 
+      // 删除项目前，先把该项目下所有需求备份进档案（标记为已删除），避免整块看板数据丢失
+      try {
+        const doomedBoard = readBoard(id);
+        (Array.isArray(doomedBoard.tasks) ? doomedBoard.tasks : []).forEach(t => archiveTask(t, deleted, 'deleted'));
+      } catch (e) { console.error('[backup] 备份被删项目需求失败:', e.message); }
+
       // 清理对应的看板数据文件
       const boardFile = getBoardFile(id);
       try { if (fs.existsSync(boardFile)) fs.unlinkSync(boardFile); } catch (e) {}
@@ -740,10 +1155,23 @@ async function handleRequest(req, res) {
     }
 
     if (method === 'DELETE' || method === 'POST') {
+      const purged = allList.filter(t => !!t.deleted_at);
       const remaining = allList.filter(t => !t.deleted_at);
       const deletedCount = allList.length - remaining.length;
       data.tasks = remaining;
       writeBoard(targetProjId, data);
+      // 记录一次清空事件。需求本体仍留在备份档案里（清空前已归档），
+      // 这里只是留个可追溯的痕迹，便于日后查「某条需求去哪了」。
+      if (purged.length) {
+        appendJournal({
+          at: new Date().toISOString(),
+          action: 'trash_purged',
+          project_id: targetProjId,
+          project_name: (findProjectById(targetProjId) || {}).name || '',
+          count: purged.length,
+          task_ids: purged.map(t => t.id)
+        });
+      }
       return json(res, { success: true, deleted_count: deletedCount, project_id: targetProjId });
     }
   }
@@ -782,6 +1210,8 @@ async function handleRequest(req, res) {
       if (!Array.isArray(data.tasks)) data.tasks = [];
       data.tasks.unshift(task);
       writeBoard(targetProjId, data);
+      // 落盘备份：新建的需求立刻进入备份档案 + 事件日志
+      archiveTask(task, findProjectById(targetProjId), 'created');
       return json(res, task, 201);
     }
   }
@@ -811,6 +1241,9 @@ async function handleRequest(req, res) {
     task.deleted_at = new Date().toISOString();
     task.status_before_delete = task.status;
     writeBoard(targetProjId, data);
+    // 落盘备份：移入垃圾箱等同于「删除」，必须同步进备份档案，
+    // 否则「清空垃圾箱」之后这条需求就彻底没救了
+    archiveTask(task, findProjectById(targetProjId), 'deleted');
     const trashCount = data.tasks.filter(t => !!t.deleted_at).length;
     return json(res, { ...task, trash_count: trashCount });
   }
@@ -843,6 +1276,8 @@ async function handleRequest(req, res) {
       delete task.status_before_delete;
     }
     writeBoard(targetProjId, data);
+    // 落盘备份：从垃圾箱还原后，档案里的 deleted_at 标记也要一并清掉
+    archiveTask(task, findProjectById(targetProjId), 'restored');
     const trashCount = data.tasks.filter(t => !!t.deleted_at).length;
     return json(res, { ...task, trash_count: trashCount });
   }
@@ -895,12 +1330,16 @@ async function handleRequest(req, res) {
       }
       data.tasks[idx] = { ...task, ...body };
       writeBoard(targetProjId, data);
+      // 落盘备份：记录本次修改后的完整内容（内容有变化时追加一个历史版本）
+      archiveTask(data.tasks[idx], findProjectById(targetProjId), 'updated');
       return json(res, data.tasks[idx]);
     }
     if (method === 'DELETE') {
       if (idx === -1) return err(res, 'Task not found', 404);
       const deleted = data.tasks.splice(idx, 1)[0];
       writeBoard(targetProjId, data);
+      // 落盘备份：删除的需求保留在档案里并标记 deleted_at，可随时恢复
+      archiveTask(deleted, findProjectById(targetProjId), 'deleted');
       return json(res, deleted);
     }
   }
@@ -1009,6 +1448,119 @@ async function handleRequest(req, res) {
     }
   }
 
+  // ---- /api/backups - 备份概览 ----
+  if (path_ === '/api/backups' && method === 'GET') {
+    return json(res, getBackupSummary());
+  }
+
+  // ---- /api/backups/archive - 备份档案列表 ----
+  if (path_ === '/api/backups/archive' && method === 'GET') {
+    const archive = readArchive();
+    const q         = (url.searchParams.get('q') || '').trim().toLowerCase();
+    const projectId = url.searchParams.get('project_id') || '';
+    const onlyDeleted = url.searchParams.get('deleted') === '1';
+
+    // 按「最近一次备份时间」倒序：用户翻档案时最关心刚动过的那几条，
+    // 而不是最早被收录的那几条（档案数组本身是按首次收录顺序追加的）。
+    let list = (archive.tasks || []).slice().sort((x, y) =>
+      String(y.last_backed_up_at || '').localeCompare(String(x.last_backed_up_at || ''))
+    );
+    if (projectId)   list = list.filter(t => t.project_id === projectId);
+    if (onlyDeleted) list = list.filter(t => !!t.deleted_at);
+    if (q) {
+      list = list.filter(t => {
+        const tk = t.task || {};
+        return (tk.title || '').toLowerCase().includes(q) ||
+               (tk.prompt || '').toLowerCase().includes(q) ||
+               (tk.tags || []).some(x => String(x).toLowerCase().includes(q));
+      });
+    }
+
+    const items = list.map(t => {
+      const tk = t.task || {};
+      return {
+        id: t.id,
+        title: tk.title || '(无标题)',
+        status: tk.status || 'todo',
+        priority: tk.priority || 'medium',
+        tags: tk.tags || [],
+        prompt: tk.prompt || '',
+        project_id: t.project_id || '',
+        project_name: t.project_name || '',
+        first_created_at: t.first_created_at || '',
+        last_backed_up_at: t.last_backed_up_at || '',
+        last_action: t.last_action || '',
+        deleted_at: t.deleted_at || null,
+        version_count: t.version_count || (Array.isArray(t.versions) ? t.versions.length : 0)
+      };
+    });
+    return json(res, { total: items.length, items });
+  }
+
+  // ---- /api/backups/journal - 事件日志（按天） ----
+  if (path_ === '/api/backups/journal' && method === 'GET') {
+    return json(res, readJournal(url.searchParams.get('date')));
+  }
+
+  // ---- /api/backups/snapshot - 手动全量快照 ----
+  if (path_ === '/api/backups/snapshot' && method === 'POST') {
+    const snap = createSnapshot('manual');
+    return json(res, { success: true, ...snap }, 201);
+  }
+
+  // ---- /api/backups/restore - 从备份档案恢复需求 ----
+  if (path_ === '/api/backups/restore' && method === 'POST') {
+    const body = await readBody(req);
+    if (!body.task_id) return err(res, '缺少 task_id', 400);
+    const result = restoreTaskFromArchive(body.task_id, body.project_id);
+    if (result.error) {
+      return err(res, result.message || result.error, result.error === 'already_exists' ? 409 : 404);
+    }
+    return json(res, { success: true, ...result });
+  }
+
+  // ---- /api/backups/rebuild - 从事件日志重建档案（灾备） ----
+  if (path_ === '/api/backups/rebuild') {
+    if (method === 'GET') {
+      // 预览：只统计能重放出什么，不落盘
+      const { rebuilt, applied, files } = rebuildArchiveFromJournal();
+      return json(res, {
+        preview: true,
+        journal_files: files,
+        events_applied: applied,
+        would_rebuild_tasks: rebuilt.tasks.length,
+        would_rebuild_deleted: rebuilt.tasks.filter(t => !!t.deleted_at).length
+      });
+    }
+    if (method === 'POST') {
+      const result = applyRebuildFromJournal();
+      if (result.error) return err(res, result.message || result.error, 400);
+      return json(res, result);
+    }
+  }
+
+  // ---- /api/backups/export - 导出全部备份（档案 + 当前看板） ----
+  if (path_ === '/api/backups/export' && method === 'GET') {
+    const archive = readArchive();
+    const pData   = getProjectsData();
+    const boards  = {};
+    pData.projects.forEach(p => { boards[p.id] = readBoard(p.id); });
+
+    const payload = {
+      exported_at: new Date().toISOString(),
+      generator: 'vibe-coding-dashboard',
+      archive,
+      projects: pData.projects,
+      boards
+    };
+    cors(res);
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Disposition': `attachment; filename="vibe-backup-${timeStamp()}.json"`
+    });
+    return res.end(JSON.stringify(payload, null, 2));
+  }
+
   // ---- 静态文件 ----
   if (!path_.startsWith('/api/')) {
     return serveStatic(req, res, path_);
@@ -1028,6 +1580,9 @@ const server = http.createServer(async (req, res) => {
 });
 
 if (require.main === module) {
+  // 启动前初始化本地备份：回填历史需求 + 生成当天全量快照
+  initBackup();
+
   server.listen(PORT, HOST, () => {
     console.log('');
     console.log('╔═══════════════════════════════════════╗');
@@ -1036,8 +1591,14 @@ if (require.main === module) {
     console.log('╚═══════════════════════════════════════╝');
     console.log('');
     console.log(`仅本机可访问（${HOST}:${PORT}）`);
+    console.log(`🗄️  需求备份目录：${BACKUP_DIR}`);
     console.log('按 Ctrl+C 停止服务');
   });
 }
 
-module.exports = { server, handleRequest, getProjectsData, getActiveProject, readBoard, writeBoard, initDataStorage };
+module.exports = {
+  server, handleRequest, getProjectsData, getActiveProject, readBoard, writeBoard, initDataStorage,
+  // 备份模块
+  initBackup, archiveTask, createSnapshot, readArchive, getBackupSummary, restoreTaskFromArchive,
+  BACKUP_DIR, ARCHIVE_FILE
+};

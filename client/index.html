@@ -395,6 +395,54 @@
           </div>
         </div>
       </div>
+
+      <!-- 需求本地备份 -->
+      <div class="settings-card settings-card-wide" id="backupCard">
+        <div class="settings-card-header">
+          <div>
+            <h2>🗄️ 需求本地备份</h2>
+            <div class="card-subtitle">每条需求在创建 / 修改 / 删除时都会自动落盘备份，误删也能一键找回</div>
+          </div>
+          <div class="backup-actions">
+            <button class="btn btn-outline btn-sm" id="btnBackupSnapshot">💾 立即全量备份</button>
+            <a class="btn btn-outline btn-sm" id="btnBackupExport" href="/api/backups/export">📤 导出备份</a>
+            <button class="btn btn-primary btn-sm" id="btnBackupBrowse">🗂️ 查看与恢复</button>
+          </div>
+        </div>
+
+        <div class="backup-stats">
+          <div class="backup-stat">
+            <span class="backup-stat-num" id="bkTotal">—</span>
+            <span class="backup-stat-label">已备份需求</span>
+          </div>
+          <div class="backup-stat">
+            <span class="backup-stat-num" id="bkAlive">—</span>
+            <span class="backup-stat-label">在库需求</span>
+          </div>
+          <div class="backup-stat">
+            <span class="backup-stat-num backup-stat-warn" id="bkDeleted">—</span>
+            <span class="backup-stat-label">可恢复（已删除）</span>
+          </div>
+          <div class="backup-stat">
+            <span class="backup-stat-num" id="bkSnapshots">—</span>
+            <span class="backup-stat-label">全量快照</span>
+          </div>
+        </div>
+
+        <div class="backup-path">
+          <span class="backup-path-label">备份目录</span>
+          <code id="bkDir">—</code>
+          <button class="btn btn-outline btn-sm" id="btnCopyBackupDir">📋 复制</button>
+        </div>
+        <div class="form-hint" id="bkUpdatedAt">最近备份：—</div>
+
+        <div class="backup-recovery">
+          <span class="backup-recovery-text">
+            档案文件若被误删或写坏，可从只追加的事件日志重放重建
+          </span>
+          <button class="btn btn-outline btn-sm" id="btnBackupRebuild">🛠️ 从日志重建档案</button>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -540,6 +588,32 @@
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" id="trashModalDone">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======= 需求备份档案 模态框 ======= -->
+<div class="modal-overlay" id="backupModal">
+  <div class="modal" style="max-width:820px">
+    <div class="modal-header">
+      <span>🗂️ 需求备份档案</span>
+      <button class="modal-close" id="backupModalClose">✕</button>
+    </div>
+    <div class="backup-toolbar">
+      <input type="text" id="backupSearch" placeholder="搜索标题 / Prompt 内容 / 标签..." autocomplete="off" />
+      <label class="backup-filter">
+        <input type="checkbox" id="backupOnlyDeleted" />
+        <span>只看已删除</span>
+      </label>
+    </div>
+    <div class="modal-body" style="padding:0;min-height:280px;max-height:52vh">
+      <div id="backupList" class="backup-list"></div>
+    </div>
+    <div class="modal-footer" style="justify-content:space-between">
+      <div id="backupListInfo" style="font-size:12px;color:var(--text-muted)"></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline" id="backupModalCancel">关闭</button>
+      </div>
     </div>
   </div>
 </div>

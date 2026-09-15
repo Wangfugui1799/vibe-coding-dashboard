@@ -1,0 +1,218 @@
+{
+  "version": 1,
+  "created_at": "2026-09-15T10:10:06.970Z",
+  "updated_at": "2026-09-15T10:48:46.725Z",
+  "tasks": [
+    {
+      "id": "task_demo_001",
+      "project_id": "proj_default",
+      "project_name": "NewEP",
+      "first_created_at": "2026-09-13T08:00:00.000Z",
+      "first_backed_up_at": "2026-09-15T10:10:06.966Z",
+      "last_backed_up_at": "2026-09-15T10:10:06.966Z",
+      "last_action": "backfill",
+      "deleted_at": null,
+      "version_count": 1,
+      "task": {
+        "id": "task_demo_001",
+        "title": "示例：实现用户登录功能",
+        "status": "done",
+        "priority": "high",
+        "prompt": "## 背景与目标\n实现基础的用户名/密码登录功能，支持 JWT token。\n\n## 具体要求\n- [ ] 登录页面 UI\n- [ ] 后端 /api/login 接口\n- [ ] JWT 生成与验证\n\n## 技术约束\n- 技术栈：Node.js + Express\n- 使用 bcrypt 加密密码\n\n## 验收标准\n- [ ] 正确密码可以登录\n- [ ] 错误密码返回 401",
+        "created_at": "2026-09-13T08:00:00.000Z",
+        "started_at": "2026-09-13T08:30:00.000Z",
+        "done_at": "2026-09-13T09:15:00.000Z",
+        "linked_commits": [],
+        "tags": [
+          "auth",
+          "backend"
+        ],
+        "milestone_id": ""
+      },
+      "versions": [
+        {
+          "at": "2026-09-15T10:10:06.966Z",
+          "action": "backfill",
+          "snapshot": {
+            "id": "task_demo_001",
+            "title": "示例：实现用户登录功能",
+            "status": "done",
+            "priority": "high",
+            "prompt": "## 背景与目标\n实现基础的用户名/密码登录功能，支持 JWT token。\n\n## 具体要求\n- [ ] 登录页面 UI\n- [ ] 后端 /api/login 接口\n- [ ] JWT 生成与验证\n\n## 技术约束\n- 技术栈：Node.js + Express\n- 使用 bcrypt 加密密码\n\n## 验收标准\n- [ ] 正确密码可以登录\n- [ ] 错误密码返回 401",
+            "created_at": "2026-09-13T08:00:00.000Z",
+            "started_at": "2026-09-13T08:30:00.000Z",
+            "done_at": "2026-09-13T09:15:00.000Z",
+            "linked_commits": [],
+            "tags": [
+              "auth",
+              "backend"
+            ],
+            "milestone_id": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "task_demo_002",
+      "project_id": "proj_default",
+      "project_name": "NewEP",
+      "first_created_at": "2026-09-13T09:00:00.000Z",
+      "first_backed_up_at": "2026-09-15T10:10:06.988Z",
+      "last_backed_up_at": "2026-09-15T10:10:06.988Z",
+      "last_action": "backfill",
+      "deleted_at": null,
+      "version_count": 1,
+      "task": {
+        "id": "task_demo_002",
+        "title": "示例：搭建项目基础架构",
+        "status": "doing",
+        "priority": "high",
+        "prompt": "## 背景与目标\n搭建 Vibe Coding 仪表盘的前后端基础架构。\n\n## 具体要求\n- [ ] Express 服务器搭建\n- [ ] 静态文件托管\n- [ ] API 路由规划\n\n## 技术约束\n- 纯 Node.js，不使用框架\n\n## 验收标准\n- [ ] localhost:3333 可以访问\n- [ ] API 接口正常响应",
+        "created_at": "2026-09-13T09:00:00.000Z",
+        "started_at": "2026-09-13T09:30:00.000Z",
+        "done_at": null,
+        "linked_commits": [],
+        "tags": [
+          "infra"
+        ],
+        "milestone_id": ""
+      },
+      "versions": [
+        {
+          "at": "2026-09-15T10:10:06.988Z",
+          "action": "backfill",
+          "snapshot": {
+            "id": "task_demo_002",
+            "title": "示例：搭建项目基础架构",
+            "status": "doing",
+            "priority": "high",
+            "prompt": "## 背景与目标\n搭建 Vibe Coding 仪表盘的前后端基础架构。\n\n## 具体要求\n- [ ] Express 服务器搭建\n- [ ] 静态文件托管\n- [ ] API 路由规划\n\n## 技术约束\n- 纯 Node.js，不使用框架\n\n## 验收标准\n- [ ] localhost:3333 可以访问\n- [ ] API 接口正常响应",
+            "created_at": "2026-09-13T09:00:00.000Z",
+            "started_at": "2026-09-13T09:30:00.000Z",
+            "done_at": null,
+            "linked_commits": [],
+            "tags": [
+              "infra"
+            ],
+            "milestone_id": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "task_demo_003",
+      "project_id": "proj_default",
+      "project_name": "NewEP",
+      "first_created_at": "2026-09-13T10:00:00.000Z",
+      "first_backed_up_at": "2026-09-15T10:10:07.010Z",
+      "last_backed_up_at": "2026-09-15T10:10:07.010Z",
+      "last_action": "backfill",
+      "deleted_at": null,
+      "version_count": 1,
+      "task": {
+        "id": "task_demo_003",
+        "title": "示例：实现 Prompt 模板库",
+        "status": "doing",
+        "priority": "medium",
+        "prompt": "## 背景与目标\n内置常用 Prompt 模板，让用户快速开始写需求文档。\n\n## 具体要求\n- [ ] 「实现新功能」模板\n- [ ] 「修复 Bug」模板\n- [ ] 「代码重构」模板\n- [ ] 「写单元测试」模板\n\n## 技术约束\n- 模板以 Markdown 格式存储\n- 支持一键插入到编辑器\n\n## 验收标准\n- [ ] 点击模板可以填充编辑器\n- [ ] 可以自定义保存模板",
+        "created_at": "2026-09-13T10:00:00.000Z",
+        "started_at": "2026-09-13T08:29:29.546Z",
+        "done_at": null,
+        "linked_commits": [],
+        "tags": [
+          "feature",
+          "ux"
+        ],
+        "milestone_id": ""
+      },
+      "versions": [
+        {
+          "at": "2026-09-15T10:10:07.010Z",
+          "action": "backfill",
+          "snapshot": {
+            "id": "task_demo_003",
+            "title": "示例：实现 Prompt 模板库",
+            "status": "doing",
+            "priority": "medium",
+            "prompt": "## 背景与目标\n内置常用 Prompt 模板，让用户快速开始写需求文档。\n\n## 具体要求\n- [ ] 「实现新功能」模板\n- [ ] 「修复 Bug」模板\n- [ ] 「代码重构」模板\n- [ ] 「写单元测试」模板\n\n## 技术约束\n- 模板以 Markdown 格式存储\n- 支持一键插入到编辑器\n\n## 验收标准\n- [ ] 点击模板可以填充编辑器\n- [ ] 可以自定义保存模板",
+            "created_at": "2026-09-13T10:00:00.000Z",
+            "started_at": "2026-09-13T08:29:29.546Z",
+            "done_at": null,
+            "linked_commits": [],
+            "tags": [
+              "feature",
+              "ux"
+            ],
+            "milestone_id": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "task_1789469326544_kwvv",
+      "project_id": "proj_1789292774357_lusk",
+      "project_name": "ToDoList",
+      "first_created_at": "2026-09-15T10:48:46.544Z",
+      "first_backed_up_at": "2026-09-15T10:48:46.553Z",
+      "last_backed_up_at": "2026-09-15T10:48:46.723Z",
+      "last_action": "deleted",
+      "deleted_at": "2026-09-15T10:48:46.723Z",
+      "version_count": 2,
+      "task": {
+        "id": "task_1789469326544_kwvv",
+        "title": "3334端口测试需求",
+        "status": "done",
+        "priority": "high",
+        "prompt": "## 用途\n验证 3334 实例的备份链路",
+        "created_at": "2026-09-15T10:48:46.544Z",
+        "started_at": "2026-09-15T10:48:46.606Z",
+        "done_at": "2026-09-15T10:48:46.606Z",
+        "linked_commits": [],
+        "tags": [
+          "port-test"
+        ],
+        "milestone_id": ""
+      },
+      "versions": [
+        {
+          "at": "2026-09-15T10:48:46.553Z",
+          "action": "created",
+          "snapshot": {
+            "id": "task_1789469326544_kwvv",
+            "title": "3334端口测试需求",
+            "status": "todo",
+            "priority": "high",
+            "prompt": "## 用途\n验证 3334 实例的备份链路",
+            "created_at": "2026-09-15T10:48:46.544Z",
+            "started_at": null,
+            "done_at": null,
+            "linked_commits": [],
+            "tags": [
+              "port-test"
+            ],
+            "milestone_id": ""
+          }
+        },
+        {
+          "at": "2026-09-15T10:48:46.612Z",
+          "action": "updated",
+          "snapshot": {
+            "id": "task_1789469326544_kwvv",
+            "title": "3334端口测试需求",
+            "status": "done",
+            "priority": "high",
+            "prompt": "## 用途\n验证 3334 实例的备份链路",
+            "created_at": "2026-09-15T10:48:46.544Z",
+            "started_at": "2026-09-15T10:48:46.606Z",
+            "done_at": "2026-09-15T10:48:46.606Z",
+            "linked_commits": [],
+            "tags": [
+              "port-test"
+            ],
+            "milestone_id": ""
+          }
+        }
+      ]
+    }
+  ]
+}
