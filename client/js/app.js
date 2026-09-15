@@ -642,8 +642,97 @@ function initModal() {
   document.getElementById('filterPriority').addEventListener('change', () => renderKanban());
 }
 
+// ======= GitHub 远端视图（本地 Git 布局保持独立）=======
+let remoteGitRequest = 0;
+let remoteGitProject = '';
+let remoteGitBranch = '';
+
+function initRemoteGitUI() {
+  document.getElementById('gitLayout').style.display = 'none';
+  document.querySelector('#tab-git .git-top-actions').style.display = 'none';
+  const panel = document.createElement('div');
+  panel.id = 'remoteGitPanel';
+  panel.innerHTML = '<div class="git-card">正在准备 GitHub 远端视图…</div>';
+  document.getElementById('tab-git').appendChild(panel);
+  for (const id of ['settingProjectPath', 'projectModalPath']) {
+    const input = document.getElementById(id);
+    const group = input.closest('.form-group');
+    group.querySelector('label').textContent = 'GitHub 仓库';
+    input.placeholder = 'owner/repo 或 https://github.com/owner/repo';
+    group.querySelector('.form-hint').textContent = '公开仓库直接读取；私有仓库需在 Vercel 配置只读 GITHUB_TOKEN。默认项目留空时读取当前部署仓库。';
+  }
+  document.getElementById('btnBrowseFolder').style.display = 'none';
+  document.getElementById('btnBrowseModalPath').style.display = 'none';
+  document.getElementById('settingRefreshInterval').closest('.form-group').style.display = 'none';
+}
+
+async function refreshRemoteGit(branch) {
+  const panel = document.getElementById('remoteGitPanel');
+  if (!panel) return;
+  const projectId = activeProjectId;
+  const projectKey = projectId + ':' + (allProjects.find(p => p.id === projectId)?.path || '');
+  if (remoteGitProject !== projectKey) {
+    remoteGitBranch = '';
+    remoteGitProject = projectKey;
+  }
+  if (branch !== undefined) remoteGitBranch = branch;
+  const requestId = ++remoteGitRequest;
+  panel.setAttribute('aria-busy', 'true');
+  try {
+    const data = await api(`/git/status?branch=${encodeURIComponent(remoteGitBranch)}`);
+    if (requestId !== remoteGitRequest || projectId !== activeProjectId) return;
+    remoteGitBranch = data.branch;
+    const branches = data.branches.slice();
+    if (!branches.some(b => b.name === data.branch)) branches.unshift({ name: data.branch, hash: '' });
+    const date = value => value ? escHtml(new Date(value).toLocaleString('zh-CN')) : '—';
+    const statuses = { added: '新增', removed: '删除', modified: '修改', renamed: '重命名', copied: '复制' };
+    panel.innerHTML = `
+      <div class="git-card remote-git-toolbar">
+        <div><strong>🌐 GitHub 远端 · ${escHtml(data.repository)}</strong>
+          <p class="form-hint">仅展示已推送的提交，不包含本机未提交修改、Worktree 或 Stash。</p>
+          <p class="form-hint">数据读取时间：${date(data.fetched_at)} · 最多缓存 ${data.cache_seconds / 60} 分钟${data.authenticated ? '' : ' · 未配置 Token，GitHub 共享 IP 额度较低'}</p>
+        </div>
+        <div class="remote-git-controls">
+          <label for="remoteBranchSelect">远端分支</label>
+          <select id="remoteBranchSelect">${branches.map(b => `<option value="${escHtml(b.name)}" ${b.name === data.branch ? 'selected' : ''}>${escHtml(b.name)}${b.name === data.default_branch ? '（默认）' : ''}</option>`).join('')}</select>
+          <button class="btn btn-outline btn-sm" id="remoteGitRefresh">↻ 刷新</button>
+          <a class="btn btn-outline btn-sm" href="${escHtml(data.url)}" target="_blank" rel="noopener noreferrer">在 GitHub 打开 ↗</a>
+        </div>
+        ${data.branches_truncated ? '<p class="form-hint">分支列表仅显示前 100 条，更多请在 GitHub 查看。</p>' : ''}
+      </div>
+      <div class="remote-git-columns">
+        <div class="git-card">
+          <div class="git-card-header">📜 ${escHtml(data.branch)} · 提交历史${data.commits_truncated ? '（最近 30 条）' : ''}</div>
+          ${data.commits.length ? data.commits.map(c => `<div class="timeline-item"><div class="timeline-content">
+            <a class="timeline-msg" href="${escHtml(c.url)}" target="_blank" rel="noopener noreferrer">${escHtml(c.message)}</a>
+            <div class="timeline-meta"><span class="timeline-hash">${escHtml(c.hash)}</span><span>${escHtml(c.author)}</span><span>${date(c.datetime)}</span></div>
+          </div></div>`).join('') : '<p class="git-empty-hint">此分支暂无提交</p>'}
+        </div>
+        <div>
+          <div class="git-card"><div class="git-card-header">最新提交的文件变更 · ${escHtml(data.commits[0]?.hash || '—')}</div>
+            <p class="form-hint">与该提交的父提交比较${data.files_truncated ? '，仅显示前 100 个文件，完整内容请打开提交链接' : ''}。</p>
+            ${data.files.length ? data.files.map(f => `<div class="git-file-item"><span class="file-status">${escHtml(statuses[f.status] || f.status)}</span><span class="file-name">${escHtml(f.file)}</span><span>+${Number(f.additions) || 0} / −${Number(f.deletions) || 0}</span></div>`).join('') : '<p class="git-empty-hint">该提交没有可显示的文件变更</p>'}
+          </div>
+          <div class="git-card"><div class="git-card-header">🏷️ Tags${data.tags_truncated ? '（前 100 条）' : ''}</div>
+            ${data.tags.length ? data.tags.map(t => `<div class="tag-item"><span class="tag-name">${escHtml(t.name)}</span><span class="tag-hash">${escHtml(t.hash)}</span></div>`).join('') : '<p class="git-empty-hint">暂无标签</p>'}
+          </div>
+        </div>
+      </div>`;
+    document.getElementById('remoteBranchSelect').addEventListener('change', e => refreshRemoteGit(e.target.value));
+    document.getElementById('remoteGitRefresh').addEventListener('click', () => refreshRemoteGit());
+  } catch (error) {
+    if (requestId !== remoteGitRequest || projectId !== activeProjectId) return;
+    panel.innerHTML = `<div class="git-card"><h3>GitHub 远端暂不可用</h3><p>${escHtml(error.message)}</p><button class="btn btn-primary" id="remoteGitSettings">配置仓库</button> <button class="btn btn-outline" id="remoteGitRetry">重试</button></div>`;
+    document.getElementById('remoteGitSettings').addEventListener('click', () => document.querySelector('[data-tab="settings"]').click());
+    document.getElementById('remoteGitRetry').addEventListener('click', () => refreshRemoteGit(''));
+  } finally {
+    if (requestId === remoteGitRequest) panel.removeAttribute('aria-busy');
+  }
+}
+
 // ======= Git 状态 =======
 async function refreshGitStatus() {
+  if (cloudMode) return refreshRemoteGit();
   try {
     const data = await api('/git/status');
     const noConfigPanel = document.getElementById('gitNoConfigPanel');
@@ -1235,13 +1324,14 @@ function initGitResizers() {
 }
 
 function startGitRefresh() {
-  if (cloudMode) return;
+  if (cloudMode) { refreshRemoteGit(); return; }
   if (gitRefreshTimer) clearInterval(gitRefreshTimer);
   refreshGitStatus();
   gitRefreshTimer = setInterval(refreshGitStatus, gitRefreshInterval);
 }
 
 function initGit() {
+  if (cloudMode) return;
   document.getElementById('gitRefreshBtn').addEventListener('click', refreshGitStatus);
   const resetBranchBtn = document.getElementById('btnResetTimelineBranch');
   if (resetBranchBtn) {
@@ -2494,14 +2584,13 @@ async function init() {
   } catch (e) { /* 本地服务仍可继续初始化并显示已有错误提示。 */ }
   if (cloudMode) {
     const notice = document.createElement('div');
-    notice.textContent = '☁️ 云端版 · 看板与备份独立保存在云端，不与本地自动同步。Git 状态和目录浏览请使用本地版。';
+    notice.textContent = '☁️ 云端版 · 看板与备份独立保存在云端。Git 状态读取 GitHub 远端分支与提交；本机修改请使用本地版。';
     notice.style.cssText = 'padding:10px 20px;background:var(--bg-secondary,#161b22);color:var(--text-muted,#8b949e);font-size:13px';
     document.querySelector('header').after(notice);
-    document.querySelector('[data-tab="git"]').style.display = 'none';
+    initRemoteGitUI();
     document.querySelector('#backupCard h2').textContent = '🗄️ 需求云端备份';
     document.querySelector('#backupCard .card-subtitle').textContent = '需求更新时自动保存备份，可恢复历史内容或导出下载';
     document.getElementById('btnCopyBackupDir').style.display = 'none';
-    if (location.hash === '#git') history.replaceState(null, '', '#kanban');
   }
   initTabs();
   initModal();
@@ -2518,6 +2607,7 @@ async function init() {
   await loadProjects();
   await loadTasks();
   await loadSettings();
+  if (cloudMode && location.hash === '#git') await refreshRemoteGit();
 }
 
 document.addEventListener('DOMContentLoaded', init);

@@ -2892,3 +2892,12 @@ body.resizing-col * {
   color: var(--text-muted);
   line-height: 1.5;
 }
+.remote-git-toolbar { margin-bottom: 16px; }
+.remote-git-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.remote-git-controls select { max-width: 100%; padding: 8px; background: var(--bg-panel, #161b22); color: var(--text-primary, #e6edf3); border: 1px solid var(--border, #30363d); border-radius: 6px; }
+.remote-git-columns { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 16px; }
+.remote-git-columns .timeline-msg { color: var(--text-primary, #e6edf3); text-decoration: none; overflow-wrap: anywhere; }
+.remote-git-columns .timeline-msg:hover { text-decoration: underline; }
+.remote-git-columns .file-name { overflow-wrap: anywhere; }
+#remoteGitPanel[aria-busy="true"] { opacity: .65; }
+@media (max-width: 800px) { .remote-git-columns { grid-template-columns: minmax(0, 1fr); } }

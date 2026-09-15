@@ -83,7 +83,7 @@ test('cloud authentication, static files, setup failures and local-only routes',
   assert.match(home.data, /Vibe Coding/);
   assert.match((await invoke(handler, '/js/app.js')).data, /cloudMode/);
   assert.equal((await invoke(handler, '/api/browse')).status, 501);
-  assert.equal((await invoke(handler, '/api/git/status')).status, 501);
+  assert.equal((await invoke(handler, '/api/health')).data.git.provider, 'github');
   assert.equal((await invoke(handler, '/api/tasks', 'POST', {}, { origin: 'https://evil.test' })).status, 403);
   assert.equal((await invoke(createHandler({ env: { DASHBOARD_PASSWORD: env.DASHBOARD_PASSWORD } }), '/api/tasks')).status, 503);
 });
@@ -140,4 +140,16 @@ test('cloud does not send success before persistence and rejects escaping snapsh
   assert.equal(response.status, 409);
   assert.equal(response.data.id, undefined);
   assert.throws(() => hydrate('/tmp/isolated-test', { '../escape': 'bad' }));
+});
+
+test('cloud Git routes use active project repository and keep credentials server-side', async () => {
+  const redis = redisMock();
+  const handler = createHandler({ env, storeFactory: settings => createStore(settings, redis.fetch),
+    githubClient: { status: async (repository, branch) => ({ repository, branch }) }
+  });
+  assert.equal((await invoke(handler, '/api/git/status')).data.repository, 'Wangfugui1799/vibe-coding-dashboard');
+  await invoke(handler, '/api/projects', 'POST', { name: 'Other repo', path: 'octocat/Hello-World' });
+  assert.deepEqual((await invoke(handler, '/api/git/status?branch=feature%2Ftest')).data, { repository: 'octocat/Hello-World', branch: 'feature/test' });
+  assert.equal((await invoke(handler, '/api/git/status', 'POST', {})).status, 405);
+  assert.equal((await invoke(handler, '/api/git/unknown')).status, 404);
 });

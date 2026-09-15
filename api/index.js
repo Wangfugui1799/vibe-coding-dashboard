@@ -4,6 +4,7 @@ const path = require('path');
 const { createHash, timingSafeEqual } = require('crypto');
 const { createDashboard } = require('../server/index');
 const { createStore, hydrate, collect } = require('../server/cloud-store');
+const { createGitHubClient } = require('../server/github');
 
 function reply(res, status, data) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -33,7 +34,7 @@ function bufferResponse() {
   };
 }
 
-function createHandler({ env = process.env, storeFactory = createStore } = {}) {
+function createHandler({ env = process.env, storeFactory = createStore, githubClient = createGitHubClient({ env }) } = {}) {
   return async (req, res) => {
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -53,11 +54,11 @@ function createHandler({ env = process.env, storeFactory = createStore } = {}) {
         return reply(res, 403, { error: '不允许跨站修改数据' });
       }
     }
-    if (pathname.startsWith('/api/git/') || pathname === '/api/browse') {
+    if (pathname === '/api/browse') {
       return reply(res, 501, { error: 'local_only', message: '本机 Git 和目录浏览请在本地版使用。' });
     }
     if (pathname === '/api/health') {
-      return reply(res, 200, { status: 'ok', mode: 'cloud', git: { available: false } });
+      return reply(res, 200, { status: 'ok', mode: 'cloud', git: { available: true, provider: 'github' } });
     }
     // Only serve the client directory, never repository data or configuration files.
     if (!pathname.startsWith('/api/')) {
@@ -71,6 +72,16 @@ function createHandler({ env = process.env, storeFactory = createStore } = {}) {
       hydrate(dir, previous.files);
       const dashboard = createDashboard({ dataDir: dir });
       dashboard.initDataStorage();
+      if (pathname.startsWith('/api/git/')) {
+        if (req.method !== 'GET') return reply(res, 405, { error: '远端 Git 仅支持读取' });
+        if (!['/api/git/status', '/api/git/commits', '/api/git/diff'].includes(pathname)) return reply(res, 404, { error: '接口不存在' });
+        const project = dashboard.getActiveProject();
+        const deploymentRepo = env.VERCEL_GIT_REPO_OWNER && env.VERCEL_GIT_REPO_SLUG
+          ? `${env.VERCEL_GIT_REPO_OWNER}/${env.VERCEL_GIT_REPO_SLUG}` : 'Wangfugui1799/vibe-coding-dashboard';
+        const repository = project.path || (project.id === 'proj_default' ? (env.GITHUB_REPOSITORY || deploymentRepo) : '');
+        const result = await githubClient.status(repository, new URL(req.url, 'http://localhost').searchParams.get('branch') || '');
+        return reply(res, 200, result);
+      }
       if (!previous.revision) dashboard.initBackup();
       const buffered = bufferResponse();
       await dashboard.handleRequest(req, buffered);
