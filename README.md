@@ -46,6 +46,8 @@
 
 ## 🚀 快速启动
 
+云端部署见 [Vercel 部署说明](docs/vercel.md)。本地版继续使用下方命令，数据与云端独立。
+
 ```bash
 # 1. 启动服务 (需 Node.js >= 16)
 npm start
@@ -101,4 +103,3 @@ open http://localhost:3333
 | `GET /api/backups/export` | 导出全部备份（档案 + 项目 + 看板） |
 | `GET /api/backups/rebuild` | 预览：从日志重放能重建出什么（不落盘） |
 | `POST /api/backups/rebuild` | 执行重建（旧档案自动另存） |
-

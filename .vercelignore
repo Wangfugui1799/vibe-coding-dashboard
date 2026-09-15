@@ -1,0 +1,6 @@
+server/data/
+.git/
+.workbuddy-ai/
+docs/
+test/
+.env*

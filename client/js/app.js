@@ -3,6 +3,7 @@
    ============================================= */
 
 const API = '/api';
+let cloudMode = false;
 
 // ======= 全局状态 =======
 let allTasks = [];
@@ -126,7 +127,12 @@ async function api(path, options = {}) {
     headers: { 'Content-Type': 'application/json' },
     ...options
   });
-  if (!res.ok) throw new Error(`API ${path} failed: ${res.status}`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    const message = data.message || data.error || `请求失败: ${res.status}`;
+    if (cloudMode) showToast(message, 'error');
+    throw new Error(message);
+  }
   return res.json();
 }
 
@@ -1229,6 +1235,7 @@ function initGitResizers() {
 }
 
 function startGitRefresh() {
+  if (cloudMode) return;
   if (gitRefreshTimer) clearInterval(gitRefreshTimer);
   refreshGitStatus();
   gitRefreshTimer = setInterval(refreshGitStatus, gitRefreshInterval);
@@ -1874,6 +1881,7 @@ let browseIsGit = false;
 let browserTargetInputId = 'settingProjectPath';
 
 function openBrowser(startPath, targetInputId = 'settingProjectPath') {
+  if (cloudMode) { showToast('目录浏览请在本地版使用', 'info'); return; }
   browserTargetInputId = targetInputId;
   browsePath = startPath || '';
   document.getElementById('browseModal').classList.add('open');
@@ -2291,8 +2299,8 @@ async function loadBackupSummary() {
 
     document.getElementById('bkSnapshots').textContent = s.snapshots.count;
     const dirEl = document.getElementById('bkDir');
-    dirEl.textContent = s.backup_dir;
-    dirEl.title = s.backup_dir;
+    dirEl.textContent = cloudMode ? '云端存储（可导出下载）' : s.backup_dir;
+    dirEl.title = cloudMode ? '备份随看板一起持久保存' : s.backup_dir;
     document.getElementById('bkUpdatedAt').textContent =
       `最近备份：${s.updated_at ? formatTime(s.updated_at) : '—'}` +
       (s.journal.latest ? `　·　事件日志 ${s.journal.latest}` : '');
@@ -2480,6 +2488,21 @@ function initBackupUI() {
 
 // ======= 初始化 =======
 async function init() {
+  try {
+    const health = await api('/health');
+    cloudMode = health.mode === 'cloud';
+  } catch (e) { /* 本地服务仍可继续初始化并显示已有错误提示。 */ }
+  if (cloudMode) {
+    const notice = document.createElement('div');
+    notice.textContent = '☁️ 云端版 · 看板与备份独立保存在云端，不与本地自动同步。Git 状态和目录浏览请使用本地版。';
+    notice.style.cssText = 'padding:10px 20px;background:var(--bg-secondary,#161b22);color:var(--text-muted,#8b949e);font-size:13px';
+    document.querySelector('header').after(notice);
+    document.querySelector('[data-tab="git"]').style.display = 'none';
+    document.querySelector('#backupCard h2').textContent = '🗄️ 需求云端备份';
+    document.querySelector('#backupCard .card-subtitle').textContent = '需求更新时自动保存备份，可恢复历史内容或导出下载';
+    document.getElementById('btnCopyBackupDir').style.display = 'none';
+    if (location.hash === '#git') history.replaceState(null, '', '#kanban');
+  }
   initTabs();
   initModal();
   initGit();

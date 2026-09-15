@@ -7,11 +7,13 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const { URL } = require('url');
 
+// 独立实例使云端临时工作目录与本地数据完全隔离。
+function createDashboard(options = {}) {
 const PORT       = parseInt(process.env.PORT, 10) || 3333;
 // 仅绑定本机回环地址。服务含 /api/browse（可列任意目录）且无鉴权，不可暴露到局域网
 const HOST       = '127.0.0.1';
 const CLIENT_DIR = path.join(__dirname, '../client');
-const DATA_DIR   = path.join(__dirname, 'data');
+const DATA_DIR   = options.dataDir || path.join(__dirname, 'data');
 const TASKS_FILE  = path.join(DATA_DIR, 'tasks.json');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 
@@ -111,6 +113,9 @@ function getActiveProject() {
 }
 
 function getBoardFile(projectId) {
+  if (typeof projectId !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(projectId)) {
+    throw new Error('无效的项目 ID');
+  }
   ensureDir(BOARDS_DIR);
   return path.join(BOARDS_DIR, `${projectId}.json`);
 }
@@ -159,6 +164,11 @@ function err(res, msg, status = 400) {
 }
 
 function readBody(req) {
+  if (req.body !== undefined) {
+    if (Buffer.isBuffer(req.body)) return Promise.resolve(JSON.parse(req.body.toString() || '{}'));
+    if (typeof req.body === 'string') return Promise.resolve(JSON.parse(req.body || '{}'));
+    return Promise.resolve(req.body || {});
+  }
   return new Promise((resolve, reject) => {
     let body = '';
     req.on('data', chunk => { body += chunk; });
@@ -1579,7 +1589,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-if (require.main === module) {
+function start() {
   // 启动前初始化本地备份：回填历史需求 + 生成当天全量快照
   initBackup();
 
@@ -1596,9 +1606,15 @@ if (require.main === module) {
   });
 }
 
-module.exports = {
+return {
+  start,
   server, handleRequest, getProjectsData, getActiveProject, readBoard, writeBoard, initDataStorage,
   // 备份模块
   initBackup, archiveTask, createSnapshot, readArchive, getBackupSummary, restoreTaskFromArchive,
   BACKUP_DIR, ARCHIVE_FILE
 };
+}
+
+const dashboard = createDashboard();
+if (require.main === module) dashboard.start();
+module.exports = { ...dashboard, createDashboard };
