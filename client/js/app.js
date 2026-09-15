@@ -1751,7 +1751,16 @@ async function loadBrowseDir(dirPath) {
     selectBtn.textContent = browseIsGit ? '✅ 选择此 Git 仓库' : '✅ 选择此文件夹';
 
     if (data.error && (!data.items || data.items.length === 0)) {
-      list.innerHTML = `<div class="browse-empty"><div style="color:var(--orange)">⚠️ ${escHtml(data.error)}</div><div style="font-size:12px;color:var(--text-muted);margin-top:6px">您可以在上方地址栏直接输入/粘贴目标路径后点击前往</div></div>`;
+      if (data.is_git) {
+        // 该目录是 Git 仓库，只是无权限读取子目录内容，这是正常情况
+        list.innerHTML = `<div class="browse-empty">
+          <div style="font-size:32px">📦</div>
+          <div style="color:var(--text-secondary);font-size:14px;font-weight:600;margin-top:8px">这是一个 Git 仓库</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:4px">无法列出子目录（权限受限），可直接点击底部按钮选择此路径</div>
+        </div>`;
+      } else {
+        list.innerHTML = `<div class="browse-empty"><div style="color:var(--orange)">⚠️ ${escHtml(data.error)}</div><div style="font-size:12px;color:var(--text-muted);margin-top:6px">您可以在上方地址栏直接输入/粘贴目标路径后点击前往</div></div>`;
+      }
       return;
     }
 
