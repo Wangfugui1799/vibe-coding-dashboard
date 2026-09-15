@@ -1,6 +1,21 @@
 {
   "tasks": [
     {
+      "id": "task_1789466576337_kjw2",
+      "title": "测试",
+      "status": "todo",
+      "priority": "medium",
+      "prompt": "",
+      "created_at": "2026-09-15T10:02:56.337Z",
+      "started_at": null,
+      "done_at": null,
+      "linked_commits": [],
+      "tags": [],
+      "milestone_id": "",
+      "deleted_at": "2026-09-15T10:02:57.899Z",
+      "status_before_delete": "todo"
+    },
+    {
       "id": "task_demo_001",
       "title": "示例：实现用户登录功能",
       "status": "done",

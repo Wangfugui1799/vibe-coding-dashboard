@@ -118,13 +118,15 @@ function writeBoard(projectId, data) {
 
 function getProjectStats(projectId) {
   const data = readBoard(projectId);
-  const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+  const allList = Array.isArray(data.tasks) ? data.tasks : [];
+  const tasks = allList.filter(t => !t.deleted_at);
+  const trash = allList.filter(t => !!t.deleted_at).length;
   const todo  = tasks.filter(t => t.status === 'todo').length;
   const doing = tasks.filter(t => t.status === 'doing').length;
   const done  = tasks.filter(t => t.status === 'done').length;
   const today = new Date().toDateString();
   const todayDone = tasks.filter(t => t.done_at && new Date(t.done_at).toDateString() === today).length;
-  return { total: tasks.length, todo, doing, done, todayDone };
+  return { total: tasks.length, todo, doing, done, todayDone, trash };
 }
 
 function genId(prefix = 'task') {
@@ -639,17 +641,41 @@ async function handleRequest(req, res) {
     return json(res, getProjectStats(targetProjId));
   }
 
+  // ---- /api/tasks/trash (GET 列表, DELETE/POST 清空) ----
+  if (path_ === '/api/tasks/trash') {
+    const targetProjId = url.searchParams.get('project_id') || getActiveProject().id;
+    const data = readBoard(targetProjId);
+    const allList = Array.isArray(data.tasks) ? data.tasks : [];
+
+    if (method === 'GET') {
+      const trashTasks = allList
+        .filter(t => !!t.deleted_at)
+        .sort((a, b) => new Date(b.deleted_at || 0) - new Date(a.deleted_at || 0));
+      return json(res, { tasks: trashTasks, count: trashTasks.length, project_id: targetProjId });
+    }
+
+    if (method === 'DELETE' || method === 'POST') {
+      const remaining = allList.filter(t => !t.deleted_at);
+      const deletedCount = allList.length - remaining.length;
+      data.tasks = remaining;
+      writeBoard(targetProjId, data);
+      return json(res, { success: true, deleted_count: deletedCount, project_id: targetProjId });
+    }
+  }
+
   // ---- /api/tasks ----
   if (path_ === '/api/tasks') {
     const targetProjId = url.searchParams.get('project_id') || getActiveProject().id;
     const data = readBoard(targetProjId);
     if (method === 'GET') {
-      let tasks = data.tasks || [];
+      let allList = Array.isArray(data.tasks) ? data.tasks : [];
+      let tasks = allList.filter(t => !t.deleted_at);
       const status   = url.searchParams.get('status');
       const priority = url.searchParams.get('priority');
       if (status)   tasks = tasks.filter(t => t.status === status);
       if (priority) tasks = tasks.filter(t => t.priority === priority);
-      return json(res, { tasks, project_id: targetProjId });
+      const trashCount = allList.filter(t => !!t.deleted_at).length;
+      return json(res, { tasks, trash_count: trashCount, project_id: targetProjId });
     }
     if (method === 'POST') {
       const body = await readBody(req);
@@ -665,13 +691,75 @@ async function handleRequest(req, res) {
         done_at:    body.status === 'done'  ? now : null,
         linked_commits: body.linked_commits || [],
         tags:           body.tags || [],
-        milestone_id:   body.milestone_id || ''
+        milestone_id:   body.milestone_id || '',
+        deleted_at:     null
       };
       if (!Array.isArray(data.tasks)) data.tasks = [];
       data.tasks.unshift(task);
       writeBoard(targetProjId, data);
       return json(res, task, 201);
     }
+  }
+
+  // ---- /api/tasks/:id/trash (移入垃圾箱) ----
+  const taskTrashMatch = path_.match(/^\/api\/tasks\/([^/]+)\/trash$/);
+  if (taskTrashMatch && method === 'POST') {
+    const id = taskTrashMatch[1];
+    let targetProjId = url.searchParams.get('project_id') || getActiveProject().id;
+    let data = readBoard(targetProjId);
+    let idx = Array.isArray(data.tasks) ? data.tasks.findIndex(t => t.id === id) : -1;
+    if (idx === -1 && !url.searchParams.get('project_id')) {
+      const pData = getProjectsData();
+      for (const p of pData.projects) {
+        const board = readBoard(p.id);
+        const fIdx = Array.isArray(board.tasks) ? board.tasks.findIndex(t => t.id === id) : -1;
+        if (fIdx !== -1) {
+          targetProjId = p.id;
+          data = board;
+          idx = fIdx;
+          break;
+        }
+      }
+    }
+    if (idx === -1) return err(res, 'Task not found', 404);
+    const task = data.tasks[idx];
+    task.deleted_at = new Date().toISOString();
+    task.status_before_delete = task.status;
+    writeBoard(targetProjId, data);
+    const trashCount = data.tasks.filter(t => !!t.deleted_at).length;
+    return json(res, { ...task, trash_count: trashCount });
+  }
+
+  // ---- /api/tasks/:id/restore (从垃圾箱还原) ----
+  const taskRestoreMatch = path_.match(/^\/api\/tasks\/([^/]+)\/restore$/);
+  if (taskRestoreMatch && method === 'POST') {
+    const id = taskRestoreMatch[1];
+    let targetProjId = url.searchParams.get('project_id') || getActiveProject().id;
+    let data = readBoard(targetProjId);
+    let idx = Array.isArray(data.tasks) ? data.tasks.findIndex(t => t.id === id) : -1;
+    if (idx === -1 && !url.searchParams.get('project_id')) {
+      const pData = getProjectsData();
+      for (const p of pData.projects) {
+        const board = readBoard(p.id);
+        const fIdx = Array.isArray(board.tasks) ? board.tasks.findIndex(t => t.id === id) : -1;
+        if (fIdx !== -1) {
+          targetProjId = p.id;
+          data = board;
+          idx = fIdx;
+          break;
+        }
+      }
+    }
+    if (idx === -1) return err(res, 'Task not found', 404);
+    const task = data.tasks[idx];
+    task.deleted_at = null;
+    if (task.status_before_delete) {
+      task.status = task.status_before_delete;
+      delete task.status_before_delete;
+    }
+    writeBoard(targetProjId, data);
+    const trashCount = data.tasks.filter(t => !!t.deleted_at).length;
+    return json(res, { ...task, trash_count: trashCount });
   }
 
   // ---- /api/tasks/:id ----

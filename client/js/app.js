@@ -130,11 +130,34 @@ async function api(path, options = {}) {
   return res.json();
 }
 
-function showToast(msg, type = 'info') {
+let toastTimer = null;
+
+function showToast(msg, type = 'info', actionText = null, actionCallback = null) {
   const toast = document.getElementById('toast');
-  toast.textContent = msg;
+  if (!toast) return;
+  if (toastTimer) clearTimeout(toastTimer);
+
+  toast.innerHTML = '';
+  const textSpan = document.createElement('span');
+  textSpan.textContent = msg;
+  toast.appendChild(textSpan);
+
+  if (actionText && typeof actionCallback === 'function') {
+    const actionBtn = document.createElement('button');
+    actionBtn.className = 'toast-action-btn';
+    actionBtn.textContent = actionText;
+    actionBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toast.className = 'toast';
+      if (toastTimer) clearTimeout(toastTimer);
+      actionCallback();
+    });
+    toast.appendChild(actionBtn);
+  }
+
   toast.className = `toast show ${type}`;
-  setTimeout(() => { toast.className = 'toast'; }, 2800);
+  const duration = actionText ? 5000 : 2800;
+  toastTimer = setTimeout(() => { toast.className = 'toast'; }, duration);
 }
 
 function formatTime(iso) {
@@ -182,6 +205,11 @@ async function loadTasks() {
     allTasks = data.tasks;
     renderKanban();
     updateBadges();
+    if (typeof data.trash_count === 'number') {
+      updateTrashBadge(data.trash_count);
+    } else {
+      updateTrashBadge();
+    }
   } catch (e) {
     showToast('加载任务失败，请检查服务是否启动', 'error');
   }
@@ -199,10 +227,35 @@ function filterTasks(tasks) {
   });
 }
 
+function renderMarkdownSafely(md) {
+  if (!md || !md.trim()) return '';
+  if (typeof marked !== 'undefined') {
+    try {
+      if (typeof marked.setOptions === 'function') {
+        marked.setOptions({ breaks: true, gfm: true });
+      }
+      return marked.parse(md);
+    } catch (err) {
+      console.warn('marked 解析异常:', err);
+    }
+  }
+  return `<pre style="white-space:pre-wrap;font-family:inherit;">${escHtml(md)}</pre>`;
+}
+
 function renderKanban() {
   const filtered = filterTasks(allTasks);
   const cols = { todo: [], doing: [], done: [] };
   filtered.forEach(t => { if (cols[t.status]) cols[t.status].push(t); });
+
+  const kanbanBoard = document.querySelector('.kanban-board');
+  const viewMode = localStorage.getItem('kanban_view_mode') || 'doc';
+  if (kanbanBoard) {
+    if (viewMode === 'compact') {
+      kanbanBoard.classList.add('view-compact');
+    } else {
+      kanbanBoard.classList.remove('view-compact');
+    }
+  }
 
   ['todo', 'doing', 'done'].forEach(status => {
     const container = document.getElementById(`cards-${status}`);
@@ -216,12 +269,50 @@ function renderKanban() {
       </div>`;
     } else {
       container.innerHTML = cols[status].map(t => renderCard(t)).join('');
+
+      // 智能高度检测：短文档直接完整展现，无需折叠与蒙层
+      container.querySelectorAll('.card-doc-box').forEach(docBox => {
+        const content = docBox.querySelector('.card-doc-content');
+        const footer = docBox.querySelector('.card-doc-footer');
+        const fade = docBox.querySelector('.card-doc-fade');
+        if (content && footer && fade) {
+          if (content.scrollHeight <= 150) {
+            footer.style.display = 'none';
+            fade.style.display = 'none';
+            docBox.classList.add('is-expanded');
+          }
+        }
+      });
+
       // 绑定卡片事件
       container.querySelectorAll('.task-card').forEach(card => {
         const id = card.dataset.id;
         card.addEventListener('click', (e) => {
-          if (e.target.closest('.card-action-btn')) return;
+          // 点击按钮、链接、复选框时不触发卡片模态弹窗
+          if (
+            e.target.closest('.card-action-btn') ||
+            e.target.closest('.card-doc-copy-btn') ||
+            e.target.closest('.card-doc-toggle-btn') ||
+            e.target.closest('a') ||
+            e.target.closest('input')
+          ) return;
           openTaskModal(id);
+        });
+
+        // 展开 / 折叠单张卡片文档
+        card.querySelector('.card-doc-toggle-btn')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const docBox = card.querySelector('.card-doc-box');
+          if (!docBox) return;
+          const isExpanded = docBox.classList.toggle('is-expanded');
+          const btn = e.currentTarget;
+          btn.textContent = isExpanded ? '收起 ▴' : '展开全部 ▾';
+        });
+
+        // 复制文档与 Prompt
+        card.querySelector('.card-doc-copy-btn')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          copyPrompt(id);
         });
 
         // 快捷操作按钮
@@ -291,10 +382,32 @@ function renderCard(task) {
     ? `▶ ${formatTime(task.started_at)}`
     : `📅 ${formatTime(task.created_at)}`;
 
+  // 需求文档直读预览
+  let docPreviewHtml = '';
+  if (task.prompt && task.prompt.trim()) {
+    const parsedHtml = renderMarkdownSafely(task.prompt);
+    docPreviewHtml = `
+      <div class="card-doc-box" data-task-id="${task.id}">
+        <div class="card-doc-header">
+          <span class="card-doc-tag">📄 需求文档</span>
+          <button class="card-doc-copy-btn" title="一键复制文档 Prompt">📋 复制</button>
+        </div>
+        <div class="card-doc-body">
+          <div class="card-doc-content">${parsedHtml}</div>
+          <div class="card-doc-fade"></div>
+        </div>
+        <div class="card-doc-footer">
+          <button class="card-doc-toggle-btn" title="展开或收起全部内容">展开全部 ▾</button>
+        </div>
+      </div>
+    `;
+  }
+
   return `
     <div class="task-card priority-${task.priority}" data-id="${task.id}">
       <div class="card-priority-bar"></div>
       <div class="card-title">${escHtml(task.title)}</div>
+      ${docPreviewHtml}
       ${tags ? `<div class="card-tags">${tags}</div>` : ''}
       ${commits}
       <div class="card-meta">
@@ -303,7 +416,7 @@ function renderCard(task) {
           ${nextBtn}
           <button class="card-action-btn btn-copy" title="复制 Prompt">📋</button>
           <button class="card-action-btn btn-edit" title="编辑">✏️</button>
-          <button class="card-action-btn btn-delete" title="删除">🗑</button>
+          <button class="card-action-btn btn-delete" title="移入垃圾箱">🗑</button>
         </div>
       </div>
     </div>`;
@@ -354,15 +467,36 @@ async function moveNext(id) {
 async function deleteTask(id) {
   const task = allTasks.find(t => t.id === id);
   if (!task) return;
-  if (!confirm(`确认删除需求「${task.title}」？`)) return;
   try {
-    await api(`/tasks/${id}`, { method: 'DELETE' });
+    const res = await api(`/tasks/${id}/trash`, { method: 'POST' });
     allTasks = allTasks.filter(t => t.id !== id);
     renderKanban();
     updateBadges();
-    showToast('需求已删除', 'success');
+    updateTrashBadge(res.trash_count);
+
+    showToast(`已将需求「${task.title}」移入垃圾箱 🗑`, 'info', '↩ 撤回', async () => {
+      await restoreTask(id);
+    });
   } catch (e) {
-    showToast('删除失败', 'error');
+    showToast('移入垃圾箱失败', 'error');
+  }
+}
+
+async function restoreTask(id) {
+  try {
+    const res = await api(`/tasks/${id}/restore`, { method: 'POST' });
+    if (!allTasks.some(t => t.id === id)) {
+      allTasks.unshift(res);
+    }
+    renderKanban();
+    updateBadges();
+    updateTrashBadge(res.trash_count);
+    showToast(`需求「${res.title}」已还原 ✅`, 'success');
+    if (document.getElementById('trashModal')?.classList.contains('open')) {
+      await loadTrashTasks();
+    }
+  } catch (e) {
+    showToast('还原需求失败', 'error');
   }
 }
 
@@ -385,6 +519,7 @@ function openTaskModal(id = null) {
   editingTaskId = id;
   const modal = document.getElementById('taskModal');
   const title = document.getElementById('modalTitle');
+  const btnMoveTrash = document.getElementById('modalMoveTrash');
 
   if (id) {
     const task = allTasks.find(t => t.id === id);
@@ -395,6 +530,7 @@ function openTaskModal(id = null) {
     document.getElementById('modalTaskPriority').value = task.priority;
     document.getElementById('modalTaskTags').value = (task.tags || []).join(', ');
     document.getElementById('modalTaskPrompt').value = task.prompt || '';
+    if (btnMoveTrash) btnMoveTrash.style.display = 'inline-flex';
   } else {
     title.textContent = '新建需求';
     document.getElementById('modalTaskTitle').value = '';
@@ -402,6 +538,7 @@ function openTaskModal(id = null) {
     document.getElementById('modalTaskPriority').value = 'medium';
     document.getElementById('modalTaskTags').value = '';
     document.getElementById('modalTaskPrompt').value = '';
+    if (btnMoveTrash) btnMoveTrash.style.display = 'none';
   }
 
   modal.classList.add('open');
@@ -453,6 +590,12 @@ function initModal() {
   document.getElementById('modalClose').addEventListener('click', closeModal);
   document.getElementById('modalCancel').addEventListener('click', closeModal);
   document.getElementById('modalSave').addEventListener('click', saveTask);
+  document.getElementById('modalMoveTrash')?.addEventListener('click', async () => {
+    if (!editingTaskId) return;
+    const targetId = editingTaskId;
+    closeModal();
+    await deleteTask(targetId);
+  });
   document.getElementById('taskModal').addEventListener('click', (e) => {
     if (e.target === document.getElementById('taskModal')) closeModal();
   });
@@ -1901,6 +2044,224 @@ function initBrowser() {
   });
 }
 
+// ======= 看板视图控制（文档直读 / 紧凑模式 / 全部展开） =======
+let isAllDocsExpanded = false;
+
+function initKanbanViewControls() {
+  const btnDoc = document.getElementById('viewBtnDoc');
+  const btnCompact = document.getElementById('viewBtnCompact');
+  const btnToggleAll = document.getElementById('btnToggleAllExpand');
+  const kanbanBoard = document.querySelector('.kanban-board');
+  if (!btnDoc || !btnCompact || !kanbanBoard) return;
+
+  const currentMode = localStorage.getItem('kanban_view_mode') || 'doc';
+  applyViewMode(currentMode);
+
+  btnDoc.addEventListener('click', () => {
+    applyViewMode('doc');
+  });
+
+  btnCompact.addEventListener('click', () => {
+    applyViewMode('compact');
+  });
+
+  if (btnToggleAll) {
+    btnToggleAll.addEventListener('click', () => {
+      isAllDocsExpanded = !isAllDocsExpanded;
+      document.querySelectorAll('.card-doc-box').forEach(docBox => {
+        const toggleBtn = docBox.querySelector('.card-doc-toggle-btn');
+        if (isAllDocsExpanded) {
+          docBox.classList.add('is-expanded');
+          if (toggleBtn) toggleBtn.textContent = '收起 ▴';
+        } else {
+          // 如果是短文档保持展开，长文档恢复折叠
+          const content = docBox.querySelector('.card-doc-content');
+          if (content && content.scrollHeight > 150) {
+            docBox.classList.remove('is-expanded');
+            if (toggleBtn) toggleBtn.textContent = '展开全部 ▾';
+          }
+        }
+      });
+      btnToggleAll.textContent = isAllDocsExpanded ? '↕ 全部收起' : '↕ 全部展开';
+    });
+  }
+
+  function applyViewMode(mode) {
+    localStorage.setItem('kanban_view_mode', mode);
+    if (mode === 'compact') {
+      kanbanBoard.classList.add('view-compact');
+      btnCompact.classList.add('active');
+      btnDoc.classList.remove('active');
+    } else {
+      kanbanBoard.classList.remove('view-compact');
+      btnDoc.classList.add('active');
+      btnCompact.classList.remove('active');
+    }
+  }
+}
+
+// ======= 垃圾箱管理 =======
+let trashTasks = [];
+let trashCount = 0;
+
+async function updateTrashBadge(count = null) {
+  try {
+    if (typeof count === 'number') {
+      trashCount = count;
+    } else {
+      const data = await api('/tasks/trash');
+      trashCount = data.count || 0;
+    }
+    const badge = document.getElementById('trashCountBadge');
+    const btn = document.getElementById('btnOpenTrash');
+    if (badge) badge.textContent = trashCount;
+    if (btn) {
+      if (trashCount > 0) btn.classList.add('has-items');
+      else btn.classList.remove('has-items');
+    }
+  } catch (e) {
+    console.warn('获取垃圾箱计数失败:', e);
+  }
+}
+
+async function openTrashModal() {
+  const modal = document.getElementById('trashModal');
+  if (!modal) return;
+  modal.classList.add('open');
+  await loadTrashTasks();
+}
+
+function closeTrashModal() {
+  const modal = document.getElementById('trashModal');
+  if (modal) modal.classList.remove('open');
+}
+
+async function loadTrashTasks() {
+  try {
+    const data = await api('/tasks/trash');
+    trashTasks = data.tasks || [];
+    renderTrashList();
+    updateTrashBadge(trashTasks.length);
+  } catch (e) {
+    showToast('加载垃圾箱失败', 'error');
+  }
+}
+
+function renderTrashList() {
+  const list = document.getElementById('trashList');
+  const emptyState = document.getElementById('trashEmptyState');
+  const subtitle = document.getElementById('trashModalSubtitle');
+  const btnEmpty = document.getElementById('btnEmptyTrash');
+  if (!list || !emptyState) return;
+
+  if (subtitle) {
+    subtitle.textContent = `共 ${trashTasks.length} 个已废弃需求`;
+  }
+
+  if (trashTasks.length === 0) {
+    list.innerHTML = '';
+    emptyState.style.display = 'block';
+    if (btnEmpty) btnEmpty.style.display = 'none';
+    return;
+  }
+
+  emptyState.style.display = 'none';
+  if (btnEmpty) btnEmpty.style.display = 'inline-flex';
+
+  list.innerHTML = trashTasks.map(t => {
+    const statusText = t.status === 'done' ? '✅ 已完成' : t.status === 'doing' ? '🔄 进行中' : '📝 待做';
+    const statusClass = `badge-${t.status || 'todo'}`;
+    const timeStr = t.deleted_at ? `已删除于 ${formatTime(t.deleted_at)}` : '';
+
+    const promptSnippet = (t.prompt || '').trim();
+    const previewHtml = promptSnippet
+      ? `<div class="trash-item-preview">${escHtml(promptSnippet.length > 140 ? promptSnippet.slice(0, 140) + '...' : promptSnippet)}</div>`
+      : '';
+
+    return `
+      <div class="trash-item" data-id="${t.id}">
+        <div class="trash-item-header">
+          <div class="trash-item-left">
+            <span class="trash-item-badge ${statusClass}">${statusText}</span>
+            <span class="trash-item-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>
+          </div>
+          <span class="trash-item-time">${timeStr}</span>
+        </div>
+        ${previewHtml}
+        <div class="trash-item-actions">
+          <button class="btn-trash-restore" data-id="${t.id}">↩ 还原需求</button>
+          <button class="btn-trash-delete" data-id="${t.id}">🗑 彻底删除</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  list.querySelectorAll('.btn-trash-restore').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      await restoreTask(id);
+    });
+  });
+
+  list.querySelectorAll('.btn-trash-delete').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      await permanentDeleteTask(id);
+    });
+  });
+}
+
+async function permanentDeleteTask(id) {
+  const task = trashTasks.find(t => t.id === id);
+  const taskTitle = task ? task.title : '该需求';
+  if (!confirm(`确定彻底删除需求「${taskTitle}」？\n\n此操作将永久抹除数据，无法恢复！`)) return;
+
+  try {
+    await api(`/tasks/${id}`, { method: 'DELETE' });
+    trashTasks = trashTasks.filter(t => t.id !== id);
+    renderTrashList();
+    updateTrashBadge(trashTasks.length);
+    showToast('需求已彻底永久删除', 'success');
+  } catch (e) {
+    showToast('彻底删除失败', 'error');
+  }
+}
+
+async function emptyTrash() {
+  if (trashTasks.length === 0) return;
+  if (!confirm(`确定要清空垃圾箱吗？\n\n共 ${trashTasks.length} 个废弃需求将被永久删除，不可恢复！`)) return;
+
+  try {
+    await api('/tasks/trash', { method: 'DELETE' });
+    trashTasks = [];
+    renderTrashList();
+    updateTrashBadge(0);
+    showToast('垃圾箱已彻底清空 🧹', 'success');
+  } catch (e) {
+    showToast('清空失败', 'error');
+  }
+}
+
+function initTrashModal() {
+  const btnOpen = document.getElementById('btnOpenTrash');
+  const modal = document.getElementById('trashModal');
+  const btnClose = document.getElementById('trashModalClose');
+  const btnDone = document.getElementById('trashModalDone');
+  const btnEmpty = document.getElementById('btnEmptyTrash');
+
+  if (btnOpen) btnOpen.addEventListener('click', openTrashModal);
+  if (btnClose) btnClose.addEventListener('click', closeTrashModal);
+  if (btnDone) btnDone.addEventListener('click', closeTrashModal);
+  if (modal) {
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeTrashModal();
+    });
+  }
+  if (btnEmpty) btnEmpty.addEventListener('click', emptyTrash);
+}
+
 // ======= 初始化 =======
 async function init() {
   initTabs();
@@ -1911,6 +2272,8 @@ async function init() {
   initBrowser();
   initProjectSwitcher();
   initProjectModal();
+  initKanbanViewControls();
+  initTrashModal();
 
   await loadProjects();
   await loadTasks();

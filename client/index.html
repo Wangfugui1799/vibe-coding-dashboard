@@ -81,6 +81,18 @@
           <option value="low">🟢 低</option>
         </select>
       </div>
+      <div class="view-mode-group">
+        <div class="view-mode-toggle" id="viewModeToggle">
+          <button class="view-mode-btn active" data-view="doc" id="viewBtnDoc" title="在卡片中直接展示需求文档正文">📄 文档直读</button>
+          <button class="view-mode-btn" data-view="compact" id="viewBtnCompact" title="仅展示标题与标签的紧凑看板">📋 紧凑看板</button>
+        </div>
+        <button class="btn-text-subtle" id="btnToggleAllExpand" title="一键展开或收起全部长文档">↕ 全部展开</button>
+        <button class="btn-trash-badge" id="btnOpenTrash" title="查看垃圾箱中已废弃的需求">
+          <span class="trash-icon">🗑</span>
+          <span class="trash-text">垃圾箱</span>
+          <span class="trash-count" id="trashCountBadge">0</span>
+        </button>
+      </div>
     </div>
 
     <div class="kanban-board">
@@ -428,6 +440,7 @@
       </div>
     </div>
     <div class="modal-footer">
+      <button class="btn btn-outline btn-danger-text" id="modalMoveTrash" style="margin-right:auto;display:none;">🗑 移入垃圾箱</button>
       <button class="btn btn-outline" id="modalCancel">取消</button>
       <button class="btn btn-outline" id="modalOpenEditor">✍️ 在编辑器中打开</button>
       <button class="btn btn-primary" id="modalSave">💾 保存</button>
@@ -498,6 +511,35 @@
         <button class="btn btn-outline" id="browseCancel">取消</button>
         <button class="btn btn-primary" id="browseSelect" disabled>✅ 选择此文件夹</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======= 需求垃圾箱 模态框 ======= -->
+<div class="modal-overlay" id="trashModal">
+  <div class="modal trash-modal" style="max-width:680px">
+    <div class="modal-header">
+      <div class="modal-header-left">
+        <span class="modal-title-with-icon">🗑 需求垃圾箱</span>
+        <span class="trash-modal-subtitle" id="trashModalSubtitle">0 个已废弃需求</span>
+      </div>
+      <div class="modal-header-right" style="display:flex;align-items:center;gap:10px">
+        <button class="btn btn-sm btn-danger-outline" id="btnEmptyTrash" style="display:none;">🧹 清空垃圾箱</button>
+        <button class="modal-close" id="trashModalClose">✕</button>
+      </div>
+    </div>
+    <div class="modal-body trash-modal-body">
+      <div class="trash-list" id="trashList">
+        <!-- 动态渲染已移入垃圾箱的需求 -->
+      </div>
+      <div class="trash-empty-state" id="trashEmptyState" style="display:none;">
+        <div class="empty-icon">🍃</div>
+        <div class="empty-title">垃圾箱空空如也</div>
+        <div class="empty-desc">删除的需求会暂存在这里，支持随时一键无损恢复</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="trashModalDone">关闭</button>
     </div>
   </div>
 </div>
