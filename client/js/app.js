@@ -644,8 +644,13 @@ async function refreshGitStatus() {
       if (noConfigPanel) {
         const msgEl = document.getElementById('gitNoConfigMsg');
         const detailEl = document.getElementById('gitNoConfigDetail');
-        if (msgEl) msgEl.textContent = data.error === 'not_a_git_repo' ? '该路径不是 Git 仓库' : '尚未配置 Git 项目路径';
-        if (detailEl) detailEl.textContent = data.message || '请在设置中填写你的项目路径';
+        const errText = {
+          not_a_git_repo:    '该路径不是 Git 仓库',
+          git_unavailable:   '无法调用 git 命令',
+          project_path_not_set: '尚未配置 Git 项目路径'
+        }[data.error] || 'Git 状态暂不可用';
+        if (msgEl) msgEl.textContent = errText;
+        if (detailEl) detailEl.textContent = data.detail || data.message || '请在设置中填写你的项目路径';
         noConfigPanel.style.display = 'flex';
       }
       return;
@@ -723,6 +728,10 @@ async function renderGitFiles() {
   try {
     const data = await api('/git/diff');
     const list = document.getElementById('gitFileList');
+    if (data.error) {
+      list.innerHTML = `<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:12px">${escHtml(data.message || 'Git 状态暂不可用')}</div>`;
+      return;
+    }
     if (!data.files || data.files.length === 0) {
       list.innerHTML = `<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:12px">工作区干净 ✨</div>`;
       return;

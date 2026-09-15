@@ -191,20 +191,96 @@ function serveStatic(req, res, urlPath) {
 }
 
 // ======= Git 命令（使用 execFileSync 避免 shell 解析 | 等特殊字符，静默捕获 stderr）=======
-function runGit(args, cwd) {
+
+// 候选 git 可执行文件。某些启动环境（IDE 沙箱、精简 PATH、macOS 的 /usr/bin/git 垫片
+// 无法二次 exec xcrun 时）直接 spawn 裸命令 'git' 会失败；失败若被静默吞掉，就会把
+// 「git 用不了」误报成「该路径不是 Git 仓库」。这里显式解析一个可用的绝对路径并缓存。
+const GIT_CANDIDATES = [
+  '/opt/homebrew/bin/git',
+  '/usr/local/bin/git',
+  '/Library/Developer/CommandLineTools/usr/bin/git',
+  '/usr/bin/git',
+  'git'
+];
+
+let gitBinCache;        // undefined = 未探测；null = 全部不可用；string = 可用路径
+let gitProbeError = ''; // 最近一次探测失败的原因，用于诊断
+let gitProbeAt = 0;     // 上次失败探测的时间戳
+const GIT_REPROBE_MS = 30000;
+
+function probeGit(bin) {
   try {
-    return execFileSync('git', args, {
+    const out = execFileSync(bin, ['--version'], {
+      encoding: 'utf-8',
+      timeout: 5000,
+      stdio: ['pipe', 'pipe', 'pipe']
+    }).trim();
+    return /^git version/.test(out) ? out : null;
+  } catch (e) {
+    gitProbeError = `${bin}: ${e.code || e.message}`;
+    return null;
+  }
+}
+
+function resolveGitBin() {
+  if (typeof gitBinCache === 'string') return gitBinCache;         // 已成功，永久缓存
+  // 失败结果只缓存 30s：避免一次瞬时失败把 git 永久判死
+  if (gitBinCache === null && Date.now() - gitProbeAt < GIT_REPROBE_MS) return null;
+
+  gitProbeError = '';
+  for (const bin of GIT_CANDIDATES) {
+    if (bin !== 'git' && !fs.existsSync(bin)) continue;
+    if (probeGit(bin)) { gitBinCache = bin; return gitBinCache; }
+  }
+  gitBinCache = null;
+  gitProbeAt = Date.now();
+  return gitBinCache;
+}
+
+// 子进程环境：补一个稳妥的 PATH，避免宿主环境 PATH 缺失导致找不到 git
+function gitEnv() {
+  const env = { ...process.env };
+  const fallback = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
+  env.PATH = env.PATH ? `${env.PATH}:${fallback}` : fallback;
+  return env;
+}
+
+function runGit(args, cwd) {
+  const bin = resolveGitBin();
+  if (!bin) return null;
+  try {
+    // 注意：只能用 trimEnd()。git status --porcelain 的行格式是 `XY<空格>路径`，
+    // 未暂存改动的首行以空格开头（如 " M client/js/app.js"），若用 trim() 会吃掉这个
+    // 前导空格，导致首个文件名被截掉一个字符、且暂存/修改计数错位。
+    return execFileSync(bin, args, {
       cwd,
       encoding: 'utf-8',
       timeout: 5000,
+      env: gitEnv(),
       stdio: ['pipe', 'pipe', 'ignore']
-    }).trim();
+    }).trimEnd();
   } catch (e) { return null; }
+}
+
+// git 是否可用；不可用时把真实原因带出来，便于前端/日志定位
+function gitAvailability() {
+  const bin = resolveGitBin();
+  if (bin) return { available: true, bin };
+  return {
+    available: false,
+    message: '无法执行 git 命令，Git 状态暂不可用',
+    detail: `已尝试: ${GIT_CANDIDATES.join(' → ')}${gitProbeError ? `；最后错误: ${gitProbeError}` : ''}。请确认已安装 Git，且当前进程有权限调用它。`
+  };
 }
 
 function gitStatus(projectPath) {
   if (!projectPath || !fs.existsSync(projectPath)) {
     return { error: 'project_path_not_set', message: '请在设置中配置 Git 项目路径' };
+  }
+  // 先区分「git 本身不可用」和「该路径不是仓库」，避免误导
+  const avail = gitAvailability();
+  if (!avail.available) {
+    return { error: 'git_unavailable', message: avail.message, detail: avail.detail };
   }
   const isGit = runGit(['rev-parse', '--git-dir'], projectPath);
   if (!isGit) return { error: 'not_a_git_repo', message: '该路径不是 Git 仓库' };
@@ -396,6 +472,8 @@ function gitStatus(projectPath) {
 
 function gitDiff(projectPath) {
   if (!projectPath || !fs.existsSync(projectPath)) return { files: [] };
+  const avail = gitAvailability();
+  if (!avail.available) return { error: 'git_unavailable', message: avail.message, detail: avail.detail, files: [] };
   const statusOut = runGit(['status', '--porcelain'], projectPath) || '';
   const files = statusOut ? statusOut.split('\n').filter(Boolean).map(line => ({
     status: line.slice(0, 2).trim(), file: line.slice(3)
@@ -405,6 +483,8 @@ function gitDiff(projectPath) {
 
 function gitBranchCommits(projectPath, branch) {
   if (!projectPath || !fs.existsSync(projectPath)) return { branch: branch || 'HEAD', commits: [] };
+  const avail = gitAvailability();
+  if (!avail.available) return { error: 'git_unavailable', message: avail.message, detail: avail.detail, branch: branch || 'HEAD', commits: [] };
   const args = ['log', '-25', '--pretty=format:%H|%s|%an|%ar|%ai'];
   if (branch) args.push(branch);
   const logOut = runGit(args, projectPath);
@@ -438,7 +518,12 @@ async function handleRequest(req, res) {
 
   // ---- /api/health ----
   if (path_ === '/api/health') {
-    return json(res, { status: 'ok', time: new Date().toISOString() });
+    const git = gitAvailability();
+    return json(res, {
+      status: 'ok',
+      time: new Date().toISOString(),
+      git: { available: git.available, bin: git.bin || null }
+    });
   }
 
   // ---- /api/projects ----
